@@ -122,3 +122,41 @@ export async function getRequest(db, id) {
 export function now() {
   return Math.floor(Date.now() / 1000);
 }
+
+export async function playerHistory(db, tornId) {
+  const tx = (await db.prepare(`
+    SELECT t.*, i.name AS item_name, b.name AS banker_name FROM transactions t
+    LEFT JOIN items i ON i.item_id = t.item_id LEFT JOIN bankers b ON b.torn_id = t.banker_id
+    WHERE t.counterparty_id = ? ORDER BY t.timestamp DESC LIMIT 300`).bind(tornId).all()).results;
+  const requests = (await db.prepare(`
+    SELECT r.*, i.name AS item_name, b.name AS banker_name FROM requests r
+    LEFT JOIN items i ON i.item_id = r.item_id LEFT JOIN bankers b ON b.torn_id = r.banker_id
+    WHERE r.torn_id = ? ORDER BY r.created_at DESC LIMIT 100`).bind(tornId).all()).results;
+  return { tx, requests };
+}
+
+export async function itemHistory(db, itemId) {
+  const tx = (await db.prepare(`
+    SELECT t.*, i.name AS item_name, b.name AS banker_name FROM transactions t
+    LEFT JOIN items i ON i.item_id = t.item_id LEFT JOIN bankers b ON b.torn_id = t.banker_id
+    WHERE t.item_id = ? ORDER BY t.timestamp DESC LIMIT 300`).bind(itemId).all()).results;
+  const purchases = (await db.prepare(`
+    SELECT p.*, b.name AS banker_name FROM purchases p LEFT JOIN bankers b ON b.torn_id = p.banker_id
+    WHERE p.item_id = ? ORDER BY p.timestamp DESC LIMIT 100`).bind(itemId).all()).results;
+  const requests = (await db.prepare(`
+    SELECT r.*, b.name AS banker_name FROM requests r LEFT JOIN bankers b ON b.torn_id = r.banker_id
+    WHERE r.item_id = ? ORDER BY r.created_at DESC LIMIT 100`).bind(itemId).all()).results;
+  return { tx, purchases, requests };
+}
+
+export async function requesterSummary(db) {
+  return (await db.prepare(`
+    SELECT r.torn_id, MAX(r.torn_name) AS torn_name, MAX(r.discord_id) AS discord_id,
+      COUNT(*) AS requests,
+      SUM(CASE WHEN r.status = 'fulfilled' THEN 1 ELSE 0 END) AS fulfilled,
+      SUM(CASE WHEN r.status = 'declined' THEN 1 ELSE 0 END) AS declined,
+      MAX(r.created_at) AS last_request,
+      (SELECT COALESCE(SUM(t.value_at_time), 0) FROM transactions t WHERE t.counterparty_id = r.torn_id AND t.kind = 'send' AND t.direction = 'out') AS value_received,
+      (SELECT COALESCE(SUM(t.value_at_time), 0) FROM transactions t WHERE t.counterparty_id = r.torn_id AND t.kind = 'donation' AND t.direction = 'in') AS value_donated
+    FROM requests r WHERE r.torn_id IS NOT NULL GROUP BY r.torn_id`).all()).results;
+}

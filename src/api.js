@@ -160,5 +160,41 @@ export async function handleApi(request, env, ctx) {
     return json({ ok: true, balance: f.balance });
   }
 
+  if (path === '/search') {
+    const q = (url.searchParams.get('q') || '').trim();
+    if (!q) return json({ error: 'empty' }, 400);
+    if (/^\d+$/.test(q)) {
+      const tornId = Number(q);
+      const name = (await env.DB.prepare('SELECT name FROM players WHERE torn_id = ?').bind(tornId).first())?.name || null;
+      return json({ type: 'player', torn_id: tornId, name, ...(await db.playerHistory(env.DB, tornId)) });
+    }
+    const item = await db.findItemByName(env.DB, q) || (await db.searchItems(env.DB, q, 1))[0];
+    if (item) {
+      const full = await db.getItem(env.DB, item.item_id);
+      return json({ type: 'item', item: full, ...(await db.itemHistory(env.DB, item.item_id)) });
+    }
+    const player = await env.DB.prepare('SELECT torn_id, name FROM players WHERE lower(name) = lower(?)').bind(q).first();
+    if (player) return json({ type: 'player', torn_id: player.torn_id, name: player.name, ...(await db.playerHistory(env.DB, player.torn_id)) });
+    return json({ type: 'none' });
+  }
+
+  if (path === '/risk') {
+    const minAttacks = Number(cfg.leech_min_attacks || 0);
+    const minRequests = Number(cfg.leech_min_requests || 0);
+    const rows = await db.requesterSummary(env.DB);
+    const candidates = rows.filter(r => r.fulfilled >= minRequests);
+    const bankers = await db.getBankers(env.DB);
+    const key = bankers.length ? await decrypt(env.ENCRYPTION_KEY, bankers[0].encrypted_key) : null;
+    const out = [];
+    for (const r of candidates.slice(0, 60)) {
+      let attacks = null, score = null;
+      if (key) { try { const c = await torn.fetchCompetition(key, r.torn_id); attacks = c.attacks ?? null; score = c.score ?? null; } catch {} }
+      if (attacks !== null && attacks >= minAttacks) continue;
+      out.push({ ...r, attacks, score, value_per_attack: attacks ? Math.round(r.value_received / attacks) : null });
+    }
+    out.sort((a, b) => (b.value_received - a.value_received));
+    return json({ min_attacks: minAttacks, min_requests: minRequests, flagged: out });
+  }
+
   return json({ error: 'not found' }, 404);
 }

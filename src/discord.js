@@ -132,6 +132,13 @@ async function cmdRequest(interaction, env, cfg, ctx) {
       lines.push(`Warning: below threshold of ${fmt(threshold.min_attacks)} attacks for ${item.name}.`);
     }
     if (stockQty < qty) lines.push(`Warning: only ${fmt(stockQty)} in stock.`);
+    if (tornId) {
+      const prior = await env.DB.prepare(`SELECT COUNT(*) AS n FROM requests WHERE torn_id = ? AND status = 'fulfilled'`).bind(tornId).first();
+      const minA = Number(cfg.leech_min_attacks || 0), minR = Number(cfg.leech_min_requests || 0);
+      if (attacks !== null && attacks < minA && prior.n >= minR) {
+        lines.push(`Flag: ${fmt(prior.n)} fulfilled requests with ${fmt(attacks)} attacks.`);
+      }
+    }
 
     const pub = await post(env, cfg.requests_channel, `Request #${id}: ${qty} x ${item.name} for ${who}\nStatus: open`);
     const bank = await post(env, cfg.bankers_channel, {
@@ -143,7 +150,10 @@ async function cmdRequest(interaction, env, cfg, ctx) {
     });
     await env.DB.prepare('UPDATE requests SET public_message_id = ?, banker_message_id = ? WHERE id = ?').bind(pub.id, bank.id, id).run();
     await followup(env, interaction.token, { content: `Request #${id} submitted: ${qty} x ${item.name}.` });
-  })());
+  })().catch(async (e) => {
+    console.log('request failed', e.message);
+    await followup(env, interaction.token, { content: `Request failed: ${e.message}` });
+  }));
   return json({ type: 5, data: { flags: EPHEMERAL } });
 }
 

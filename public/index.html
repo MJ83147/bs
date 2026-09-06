@@ -11,7 +11,7 @@
     --bg: #E6ECE9; --paper: #FFFFFF; --ink: #15211B; --muted: #5E6E66; --rule: #C9D3CE;
     --accent: #1E7360; --accent-ink: #FFFFFF; --warn: #B2372E; --soft: #F3F6F4;
   }
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; } [hidden] { display: none !important; }
   html, body { margin: 0; }
   body { font-family: 'Schibsted Grotesk', system-ui, sans-serif; font-size: 15px; line-height: 1.4; color: var(--ink); background: var(--bg); font-variant-numeric: tabular-nums; }
   a { color: inherit; }
@@ -89,6 +89,8 @@
       <a href="#requests" data-page="requests">Requests</a>
       <a href="#funds" data-page="funds">Funds</a>
       <a href="#totals" data-page="totals">Totals</a>
+      <a href="#search" data-page="search">Search</a>
+      <a href="#risk" data-page="risk">Risk</a>
       <a href="#settings" data-page="settings">Settings</a>
       <span class="spacer"></span>
       <button id="logout">Log out</button>
@@ -303,6 +305,7 @@ pages.settings = async () => {
   const fields = [
     ['requests_channel', 'Requests channel ID'], ['bankers_channel', 'Bankers channel ID'], ['log_channel', 'Log channel ID'],
     ['council_role', 'Council role ID'], ['banker_role', 'Banker role ID'], ['keyword', 'Keyword'],
+    ['leech_min_attacks', 'Flag below this many attacks'], ['leech_min_requests', 'Flag at this many fulfilled requests'],
     ['log_types_item_send', 'Item send log types'], ['log_types_item_receive', 'Item receive log types'],
     ['log_types_cash_send', 'Money send log types'], ['log_types_cash_receive', 'Money receive log types'],
     ['log_types_market_buy', 'Item market buy log types'], ['log_types_bazaar_buy', 'Bazaar buy log types'],
@@ -363,6 +366,88 @@ pages.settings = async () => {
     try { await api('/settings', { method: 'POST', body }); $('#cMsg').className = 'msg ok'; $('#cMsg').textContent = 'Saved'; }
     catch (err) { $('#cMsg').className = 'msg'; $('#cMsg').textContent = err.message; }
   });
+};
+
+const txCols = [
+  { h: 'When', f: r => when(r.timestamp) },
+  { h: 'Kind', f: r => r.kind },
+  { h: 'What', f: r => r.type === 'cash' ? money(r.qty) : `${fmt(r.qty)} x ${esc(r.item_name || r.item_id)}` },
+  { h: 'Value', n: 1, f: r => money(r.value_at_time) },
+  { h: 'Direction', f: r => r.direction },
+  { h: 'Player', f: r => `${esc(r.counterparty_name)} [${r.counterparty_id}]` },
+  { h: 'Banker', f: r => esc(r.banker_name) },
+  { h: 'Message', f: r => esc(r.message) },
+];
+const reqCols = [
+  { h: '#', f: r => r.id },
+  { h: 'When', f: r => when(r.created_at) },
+  { h: 'Member', f: r => `${esc(r.torn_name)}${r.torn_id ? ` [${r.torn_id}]` : ''}` },
+  { h: 'Item', f: r => `${fmt(r.qty)} x ${esc(r.item_name)}` },
+  { h: 'Attacks', n: 1, f: r => r.attacks_at_request === null ? '' : fmt(r.attacks_at_request) },
+  { h: 'Status', f: r => r.status + (r.decline_reason ? `: ${esc(r.decline_reason)}` : '') },
+  { h: 'Banker', f: r => esc(r.banker_name || '') },
+];
+
+pages.search = async () => {
+  $('#main').innerHTML = `
+    <h2>Search</h2>
+    <div class="toolbar"><input id="sq" style="width:320px" autofocus><button class="primary" id="sgo">Search</button></div>
+    <div id="sres"></div>`;
+  const go = async () => {
+    const q = $('#sq').value.trim(); if (!q) return;
+    location.hash = '#search'; 
+    const r = await api(`/search?q=${encodeURIComponent(q)}`);
+    if (r.type === 'none') { $('#sres').innerHTML = `<div class="msg">No player or item matches "${esc(q)}"</div>`; return; }
+    if (r.type === 'player') {
+      const donated = r.tx.filter(t => t.kind === 'donation').reduce((s, t) => s + t.value_at_time, 0);
+      const received = r.tx.filter(t => t.kind === 'send').reduce((s, t) => s + t.value_at_time, 0);
+      $('#sres').innerHTML = `
+        <h2>${esc(r.name || r.torn_id)} [${r.torn_id}]</h2>
+        <div class="stats">
+          <div class="stat"><b>${money(donated)}</b><span>Donated</span></div>
+          <div class="stat"><b>${money(received)}</b><span>Received</span></div>
+          <div class="stat"><b>${fmt(r.requests.length)}</b><span>Requests</span></div>
+        </div>
+        <h2>Transactions</h2>${table(txCols, r.tx.map(t => ({ ...t, _cls: t.kind })))}
+        <section><h2>Requests</h2>${table(reqCols, r.requests.map(x => ({ ...x, _cls: x.status })))}</section>`;
+    } else {
+      $('#sres').innerHTML = `
+        <h2>${esc(r.item.name)}</h2>
+        <div class="stats">
+          <div class="stat"><b>${fmt(r.tx.filter(t => t.kind === 'donation').reduce((s, t) => s + t.qty, 0))}</b><span>Donated</span></div>
+          <div class="stat"><b>${fmt(r.purchases.reduce((s, p) => s + p.qty, 0))}</b><span>Purchased</span></div>
+          <div class="stat"><b>${fmt(r.tx.filter(t => t.kind === 'send').reduce((s, t) => s + t.qty, 0))}</b><span>Sent out</span></div>
+          <div class="stat"><b>${money(r.item.market_value)}</b><span>Market value</span></div>
+        </div>
+        <h2>Transactions</h2>${table(txCols, r.tx.map(t => ({ ...t, _cls: t.kind })))}
+        <section><h2>Purchases</h2>${table([
+          { h: 'When', f: p => when(p.timestamp) }, { h: 'Qty', n: 1, f: p => fmt(p.qty) }, { h: 'Cost', n: 1, f: p => money(p.cost) }, { h: 'Source', f: p => p.source }, { h: 'Banker', f: p => esc(p.banker_name) },
+        ], r.purchases)}</section>
+        <section><h2>Requests</h2>${table(reqCols, r.requests.map(x => ({ ...x, _cls: x.status })))}</section>`;
+    }
+  };
+  $('#sgo').addEventListener('click', go);
+  $('#sq').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+};
+
+pages.risk = async () => {
+  $('#main').innerHTML = `<h2>Risk</h2><div id="riskTable"></div>`;
+  const r = await api('/risk');
+  $('#riskTable').innerHTML = table([
+    { h: 'Member', f: x => `<a href="#search" data-q="${x.torn_id}">${esc(x.torn_name)} [${x.torn_id}]</a>` },
+    { h: 'Attacks', n: 1, f: x => x.attacks === null ? '' : `<span class="warn">${fmt(x.attacks)}</span>` },
+    { h: 'Score', n: 1, f: x => x.score === null ? '' : fmt(x.score) },
+    { h: 'Fulfilled', n: 1, f: x => fmt(x.fulfilled) },
+    { h: 'Declined', n: 1, f: x => fmt(x.declined) },
+    { h: 'Received', n: 1, f: x => money(x.value_received) },
+    { h: 'Donated', n: 1, f: x => money(x.value_donated) },
+    { h: 'Per attack', n: 1, f: x => x.value_per_attack === null ? '' : money(x.value_per_attack) },
+    { h: 'Last request', f: x => when(x.last_request) },
+  ], r.flagged);
+  $('#riskTable').querySelectorAll('[data-q]').forEach(a => a.addEventListener('click', async e => {
+    e.preventDefault(); await pages.search(); $('#sq').value = a.dataset.q; $('#sgo').click();
+    document.querySelectorAll('nav a').forEach(n => n.classList.toggle('active', n.dataset.page === 'search'));
+  }));
 };
 
 (async () => {
