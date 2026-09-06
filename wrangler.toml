@@ -1,0 +1,24 @@
+name = "bs"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[triggers]
+crons = ["* * * * *"]
+
+routes = [
+  { pattern = "brainsurgeons.systoned.cc", custom_domain = true }
+]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "bs"
+database_id = "REPLACE_AFTER_CREATE"
+
+[vars]
+DISCORD_APP_ID = "1343283117313757246"
+DISCORD_PUBLIC_KEY = "90a26981c9da0cf7683a6123b3f5da8214283e8fe452d6f05cb4ea14eba004e5"
+DISCORD_GUILD_ID = "1343284075540254730"

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brain Surgeons</title>
+<style>
+  body { margin: 0; font-family: system-ui, sans-serif; background: #111; color: #eee; display: grid; place-items: center; min-height: 100vh; }
+  form { display: grid; gap: 12px; width: 260px; }
+  input, button { font: inherit; padding: 10px 12px; border-radius: 6px; border: 1px solid #333; background: #1b1b1b; color: #eee; }
+  button { background: #2d6cdf; border-color: #2d6cdf; cursor: pointer; }
+  h1 { font-size: 18px; margin: 0 0 8px; }
+</style>
+</head>
+<body>
+<form id="f">
+  <h1>Brain Surgeons</h1>
+  <input type="password" id="pw" autocomplete="current-password">
+  <button type="submit">Log in</button>
+</form>
+<script>
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: document.getElementById('pw').value }) });
+  if (r.ok) location.href = '/dashboard.html';
+  else document.getElementById('pw').value = '';
+});
+</script>
+</body>
+</html>

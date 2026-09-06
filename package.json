@@ -1,0 +1,14 @@
+{
+  "name": "bs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "migrate": "wrangler d1 migrations apply bs --remote",
+    "commands": "node scripts/register-commands.js"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}
