@@ -1,5 +1,5 @@
 import { handleInteraction } from './discord.js';
-import { handleApi, isAuthed } from './api.js';
+import { handleApi } from './api.js';
 import { poll } from './poller.js';
 
 export default {
@@ -8,9 +8,6 @@ export default {
     if (url.pathname === '/interactions' && request.method === 'POST') return handleInteraction(request, env, ctx);
     if (url.pathname.startsWith('/api/')) return handleApi(request, env, ctx);
     if (url.pathname === '/health') return new Response('ok');
-    if (url.pathname !== '/' && url.pathname !== '/index.html' && !url.pathname.startsWith('/assets/') && !url.pathname.startsWith('/login')) {
-      if (!(await isAuthed(request, env))) return Response.redirect(`${url.origin}/`, 302);
-    }
     return env.ASSETS.fetch(request);
   },
   async scheduled(event, env, ctx) {

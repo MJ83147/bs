@@ -4,27 +4,370 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Brain Surgeons</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:ital,wght@0,400;0,500;0,700;0,900;1,400&display=swap" rel="stylesheet">
 <style>
-  body { margin: 0; font-family: system-ui, sans-serif; background: #111; color: #eee; display: grid; place-items: center; min-height: 100vh; }
-  form { display: grid; gap: 12px; width: 260px; }
-  input, button { font: inherit; padding: 10px 12px; border-radius: 6px; border: 1px solid #333; background: #1b1b1b; color: #eee; }
-  button { background: #2d6cdf; border-color: #2d6cdf; cursor: pointer; }
-  h1 { font-size: 18px; margin: 0 0 8px; }
+  :root {
+    --bg: #E6ECE9; --paper: #FFFFFF; --ink: #15211B; --muted: #5E6E66; --rule: #C9D3CE;
+    --accent: #1E7360; --accent-ink: #FFFFFF; --warn: #B2372E; --soft: #F3F6F4;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { font-family: 'Schibsted Grotesk', system-ui, sans-serif; font-size: 15px; line-height: 1.4; color: var(--ink); background: var(--bg); font-variant-numeric: tabular-nums; }
+  a { color: inherit; }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+
+  header { padding: 28px 40px 0; }
+  .brand { font-size: 34px; font-weight: 900; letter-spacing: -0.02em; line-height: 1; margin: 0 0 18px; }
+  nav { display: flex; gap: 26px; border-bottom: 1px solid var(--rule); }
+  nav a { text-decoration: none; padding: 0 0 12px; font-weight: 500; color: var(--muted); border-bottom: 3px solid transparent; margin-bottom: -1px; }
+  nav a.active { color: var(--ink); border-bottom-color: var(--accent); }
+  nav .spacer { flex: 1; }
+  nav button { background: none; border: 0; color: var(--muted); padding: 0 0 12px; }
+
+  main { padding: 28px 40px 60px; max-width: 1180px; }
+  h2 { font-size: 22px; font-weight: 700; margin: 0 0 16px; letter-spacing: -0.01em; }
+  h2 + h2, section + section { margin-top: 40px; }
+
+  .stats { display: flex; gap: 48px; margin: 0 0 32px; flex-wrap: wrap; }
+  .stat b { display: block; font-size: 30px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
+  .stat span { color: var(--muted); }
+
+  table { width: 100%; border-collapse: collapse; background: var(--paper); }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-weight: 500; color: var(--muted); }
+  td.n, th.n { text-align: right; }
+  tr.declined td, tr.transfer td { color: var(--muted); }
+  td .warn { color: var(--warn); }
+  td .ok { color: var(--accent); }
+
+  .toolbar { display: flex; gap: 10px; margin: 0 0 14px; flex-wrap: wrap; align-items: center; }
+  input, select { padding: 8px 10px; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); }
+  input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); border-radius: 4px; padding: 8px 14px; font-weight: 500; }
+  button.quiet { background: none; border: 1px solid var(--rule); border-radius: 4px; padding: 4px 10px; }
+  button.quiet.warn { color: var(--warn); border-color: var(--warn); }
+  form.grid { display: grid; grid-template-columns: 220px 1fr; gap: 10px 16px; max-width: 700px; align-items: center; }
+  form.grid label { color: var(--muted); }
+  .msg { color: var(--warn); margin: 10px 0 0; min-height: 1.4em; }
+  .msg.ok { color: var(--accent); }
+  tfoot td { border-bottom: 0; background: var(--soft); }
+  tfoot input { width: 100%; }
+
+  #login { min-height: 100vh; display: grid; place-items: center; }
+  #login form { display: grid; gap: 12px; width: 280px; }
+  #login .brand { margin-bottom: 8px; }
+
+  @media (max-width: 720px) {
+    header, main { padding-left: 16px; padding-right: 16px; }
+    .brand { font-size: 26px; }
+    nav { gap: 16px; overflow-x: auto; }
+    form.grid { grid-template-columns: 1fr; }
+    .stats { gap: 24px; }
+    th, td { padding: 8px; font-size: 14px; }
+  }
+  @media (prefers-reduced-motion: no-preference) { nav a { transition: border-color .15s; } }
 </style>
 </head>
 <body>
-<form id="f">
-  <h1>Brain Surgeons</h1>
-  <input type="password" id="pw" autocomplete="current-password">
-  <button type="submit">Log in</button>
-</form>
+<div id="login" hidden>
+  <form id="loginForm">
+    <div class="brand">Brain Surgeons</div>
+    <input type="password" id="pw" autocomplete="current-password" autofocus>
+    <button class="primary" type="submit">Log in</button>
+    <div class="msg" id="loginMsg"></div>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <header>
+    <div class="brand">Brain Surgeons</div>
+    <nav>
+      <a href="#dashboard" data-page="dashboard">Dashboard</a>
+      <a href="#ledger" data-page="ledger">Ledger</a>
+      <a href="#requests" data-page="requests">Requests</a>
+      <a href="#funds" data-page="funds">Funds</a>
+      <a href="#totals" data-page="totals">Totals</a>
+      <a href="#settings" data-page="settings">Settings</a>
+      <span class="spacer"></span>
+      <button id="logout">Log out</button>
+    </nav>
+  </header>
+  <main id="main"></main>
+</div>
+
 <script>
-document.getElementById('f').addEventListener('submit', async (e) => {
+const $ = (s, r = document) => r.querySelector(s);
+const fmt = n => Number(n || 0).toLocaleString('en-GB');
+const money = n => '$' + fmt(n);
+const when = ts => { const d = new Date(ts * 1000); return d.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); };
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+async function api(path, opts = {}) {
+  const r = await fetch('/api' + path, { headers: { 'Content-Type': 'application/json' }, ...opts, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  if (r.status === 401) { showLogin(); throw new Error('unauthorised'); }
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+
+function showLogin() { $('#login').hidden = false; $('#app').hidden = true; }
+function showApp() { $('#login').hidden = true; $('#app').hidden = false; route(); }
+
+$('#loginForm').addEventListener('submit', async e => {
   e.preventDefault();
-  const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: document.getElementById('pw').value }) });
-  if (r.ok) location.href = '/dashboard.html';
-  else document.getElementById('pw').value = '';
+  const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: $('#pw').value }) });
+  if (r.ok) { $('#pw').value = ''; showApp(); } else { $('#loginMsg').textContent = 'Wrong password'; $('#pw').value = ''; }
 });
+$('#logout').addEventListener('click', async () => { await fetch('/api/logout'); showLogin(); });
+
+const pages = {};
+function route() {
+  const page = (location.hash || '#dashboard').slice(1);
+  document.querySelectorAll('nav a').forEach(a => a.classList.toggle('active', a.dataset.page === page));
+  (pages[page] || pages.dashboard)();
+}
+window.addEventListener('hashchange', route);
+
+function table(cols, rows, foot = '') {
+  const head = cols.map(c => `<th class="${c.n ? 'n' : ''}">${c.h}</th>`).join('');
+  const body = rows.map(r => `<tr class="${r._cls || ''}">${cols.map(c => `<td class="${c.n ? 'n' : ''}">${c.f(r)}</td>`).join('')}</tr>`).join('');
+  return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody>${foot ? `<tfoot>${foot}</tfoot>` : ''}</table>`;
+}
+
+pages.dashboard = async () => {
+  const d = await api('/dashboard');
+  const value = d.stock.reduce((s, r) => s + r.qty * r.market_value, 0);
+  $('#main').innerHTML = `
+    <div class="stats">
+      <div class="stat"><b>${money(d.funds.balance)}</b><span>Funds</span></div>
+      <div class="stat"><b>${money(value)}</b><span>Stock value</span></div>
+      <div class="stat"><b>${fmt(d.open)}</b><span>Open requests</span></div>
+      <div class="stat"><b>${fmt(d.approved)}</b><span>Pending send</span></div>
+    </div>
+    <h2>Stock</h2>
+    ${table([
+      { h: 'Item', f: r => esc(r.name) },
+      { h: 'Qty', n: 1, f: r => r.qty < 0 ? `<span class="warn">${fmt(r.qty)}</span>` : fmt(r.qty) },
+      { h: 'Each', n: 1, f: r => money(r.market_value) },
+      { h: 'Value', n: 1, f: r => money(r.qty * r.market_value) },
+    ], d.stock)}`;
+};
+
+pages.ledger = async () => {
+  const bankers = await api('/bankers');
+  const state = { banker: '', kind: '', days: '30' };
+  const render = async () => {
+    const rows = (await api(`/ledger?days=${state.days}${state.banker ? '&banker=' + state.banker : ''}`)).filter(r => !state.kind || r.kind === state.kind);
+    $('#ledgerTable').innerHTML = table([
+      { h: 'When', f: r => when(r.timestamp) },
+      { h: 'Kind', f: r => r.kind },
+      { h: 'What', f: r => r.type === 'cash' ? money(r.qty) : `${fmt(r.qty)} x ${esc(r.item_name || r.item_id)}` },
+      { h: 'Value', n: 1, f: r => money(r.value_at_time) },
+      { h: 'Direction', f: r => r.direction === 'in' ? 'in' : 'out' },
+      { h: 'Player', f: r => `${esc(r.counterparty_name)} [${r.counterparty_id}]` },
+      { h: 'Banker', f: r => esc(r.banker_name) },
+      { h: 'Message', f: r => esc(r.message) },
+    ], rows.map(r => ({ ...r, _cls: r.kind })));
+  };
+  $('#main').innerHTML = `
+    <h2>Ledger</h2>
+    <div class="toolbar">
+      <select id="fBanker"><option value="">All bankers</option>${bankers.map(b => `<option value="${b.torn_id}">${esc(b.name)}</option>`).join('')}</select>
+      <select id="fKind"><option value="">All kinds</option><option value="donation">Donations</option><option value="send">Sends</option><option value="transfer">Transfers</option></select>
+      <select id="fDays"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option><option value="365">All</option></select>
+    </div>
+    <div id="ledgerTable"></div>`;
+  for (const [id, key] of [['#fBanker', 'banker'], ['#fKind', 'kind'], ['#fDays', 'days']]) {
+    $(id).addEventListener('change', e => { state[key] = e.target.value; render(); });
+  }
+  render();
+};
+
+pages.requests = async () => {
+  const state = { status: 'open' };
+  const render = async () => {
+    const rows = await api(`/requests${state.status === 'all' ? '' : '?status=' + state.status}`);
+    $('#reqTable').innerHTML = table([
+      { h: '#', f: r => r.id },
+      { h: 'When', f: r => when(r.created_at) },
+      { h: 'Member', f: r => `${esc(r.torn_name)}${r.torn_id ? ` [${r.torn_id}]` : ''}` },
+      { h: 'Item', f: r => `${fmt(r.qty)} x ${esc(r.item_name)}` },
+      { h: 'Attacks', n: 1, f: r => r.attacks_at_request === null ? '' : fmt(r.attacks_at_request) },
+      { h: 'Status', f: r => r.status + (r.decline_reason ? `: ${esc(r.decline_reason)}` : '') },
+      { h: 'Banker', f: r => esc(r.banker_name || '') },
+      { h: '', f: r => ['open', 'approved'].includes(r.status) ? `<button class="quiet warn" data-decline="${r.id}">Decline</button>` : '' },
+    ], rows.map(r => ({ ...r, _cls: r.status })));
+    $('#reqTable').querySelectorAll('[data-decline]').forEach(b => b.addEventListener('click', async () => {
+      const cell = b.parentElement;
+      cell.innerHTML = `<input placeholder="" style="width:160px"> <button class="quiet warn">Confirm</button>`;
+      const inp = cell.querySelector('input'); inp.focus();
+      cell.querySelector('button').addEventListener('click', async () => {
+        await api(`/requests/${b.dataset.decline}/decline`, { method: 'POST', body: { reason: inp.value } });
+        render();
+      });
+    }));
+  };
+  $('#main').innerHTML = `
+    <h2>Requests</h2>
+    <div class="toolbar">
+      <select id="fStatus"><option value="open">Open</option><option value="approved">Pending send</option><option value="fulfilled">Fulfilled</option><option value="declined">Declined</option><option value="all">All</option></select>
+    </div>
+    <div id="reqTable"></div>`;
+  $('#fStatus').addEventListener('change', e => { state.status = e.target.value; render(); });
+  render();
+};
+
+pages.funds = async () => {
+  const [f, bankers, purchases] = await Promise.all([api('/funds'), api('/bankers'), api('/purchases')]);
+  $('#main').innerHTML = `
+    <div class="stats">
+      <div class="stat"><b>${money(f.balance)}</b><span>Balance</span></div>
+      <div class="stat"><b>${money(f.cash_in)}</b><span>Cash in</span></div>
+      <div class="stat"><b>${money(f.cash_out)}</b><span>Cash out</span></div>
+      <div class="stat"><b>${money(f.spent)}</b><span>Spent</span></div>
+    </div>
+    <h2>Mark purchases</h2>
+    <div class="toolbar">
+      <select id="pBanker">${bankers.filter(b => b.active).map(b => `<option value="${b.torn_id}">${esc(b.name)}</option>`).join('')}</select>
+      <select id="pDays"><option value="3">3 days</option><option value="7" selected>7 days</option><option value="14">14 days</option><option value="30">30 days</option></select>
+      <button class="primary" id="pLoad">Load purchases</button>
+    </div>
+    <div id="pTable"></div>
+    <div class="toolbar" id="pConfirmBar" hidden><button class="primary" id="pConfirm">Confirm selected</button><span id="pSum"></span></div>
+    <div class="msg" id="pMsg"></div>
+    <section>
+      <h2>Marked purchases</h2>
+      ${table([
+        { h: 'When', f: r => when(r.timestamp) },
+        { h: 'Item', f: r => `${fmt(r.qty)} x ${esc(r.name || r.item_id)}` },
+        { h: 'Cost', n: 1, f: r => money(r.cost) },
+        { h: 'Source', f: r => r.source },
+        { h: 'Banker', f: r => esc(r.banker_name) },
+      ], purchases)}
+    </section>`;
+  let loaded = [];
+  const sum = () => {
+    const sel = loaded.filter((p, i) => $(`#pc${i}`).checked);
+    $('#pSum').textContent = sel.length ? `${sel.length} selected, ${money(sel.reduce((s, p) => s + p.cost, 0))}` : '';
+  };
+  $('#pLoad').addEventListener('click', async () => {
+    $('#pMsg').textContent = '';
+    try { loaded = await api(`/purchases/load?banker=${$('#pBanker').value}&days=${$('#pDays').value}`); }
+    catch (e) { $('#pMsg').textContent = e.message; return; }
+    $('#pTable').innerHTML = table([
+      { h: '', f: (r) => `<input type="checkbox" id="pc${r._i}">` },
+      { h: 'When', f: r => when(r.timestamp) },
+      { h: 'Item', f: r => `${fmt(r.qty)} x ${esc(r.name)}` },
+      { h: 'Cost', n: 1, f: r => money(r.cost) },
+      { h: 'Source', f: r => r.source },
+    ], loaded.map((p, i) => ({ ...p, _i: i })));
+    $('#pConfirmBar').hidden = !loaded.length;
+    $('#pTable').querySelectorAll('input').forEach(c => c.addEventListener('change', sum));
+  });
+  $('#pConfirm').addEventListener('click', async () => {
+    const sel = loaded.filter((p, i) => $(`#pc${i}`).checked);
+    if (!sel.length) return;
+    try {
+      const r = await api('/purchases/mark', { method: 'POST', body: { banker_id: Number($('#pBanker').value), purchases: sel } });
+      $('#pMsg').className = 'msg ok'; $('#pMsg').textContent = `Marked ${sel.length}. Balance ${money(r.balance)}.`;
+      pages.funds();
+    } catch (e) { $('#pMsg').className = 'msg'; $('#pMsg').textContent = e.message; }
+  });
+};
+
+pages.totals = async () => {
+  const t = await api('/totals');
+  $('#main').innerHTML = `
+    <h2>Donors</h2>
+    ${table([
+      { h: 'Donor', f: r => `${esc(r.counterparty_name)} [${r.counterparty_id}]` },
+      { h: 'Items', n: 1, f: r => fmt(r.item_qty) },
+      { h: 'Cash', n: 1, f: r => money(r.cash) },
+      { h: 'Total value', n: 1, f: r => money(r.total_value) },
+    ], t.donors)}
+    <section>
+      <h2>Received by members</h2>
+      ${table([
+        { h: 'Member', f: r => `${esc(r.counterparty_name)} [${r.counterparty_id}]` },
+        { h: 'Item', f: r => esc(r.item || 'cash') },
+        { h: 'Qty', n: 1, f: r => fmt(r.qty) },
+        { h: 'Value', n: 1, f: r => money(r.value) },
+      ], t.members)}
+    </section>`;
+};
+
+pages.settings = async () => {
+  const [bankers, thresholds, cfg] = await Promise.all([api('/bankers'), api('/thresholds'), api('/settings')]);
+  const fields = [
+    ['requests_channel', 'Requests channel ID'], ['bankers_channel', 'Bankers channel ID'], ['log_channel', 'Log channel ID'],
+    ['council_role', 'Council role ID'], ['banker_role', 'Banker role ID'], ['keyword', 'Keyword'],
+    ['log_types_item_send', 'Item send log types'], ['log_types_item_receive', 'Item receive log types'],
+    ['log_types_cash_send', 'Money send log types'], ['log_types_cash_receive', 'Money receive log types'],
+    ['log_types_market_buy', 'Item market buy log types'], ['log_types_bazaar_buy', 'Bazaar buy log types'],
+  ];
+  $('#main').innerHTML = `
+    <h2>Bankers</h2>
+    ${table([
+      { h: 'Name', f: r => esc(r.name) },
+      { h: 'ID', f: r => r.torn_id },
+      { h: 'Last poll', f: r => r.last_poll_ts ? when(r.last_poll_ts) : '' },
+      { h: '', f: r => r.active ? `<button class="quiet warn" data-remove="${r.torn_id}">Remove</button>` : 'removed' },
+    ], bankers, `<tr><td colspan="3"><input id="newKey" type="password" autocomplete="off" placeholder="API key"></td><td><button class="primary" id="saveKey">Save key</button></td></tr>`)}
+    <div class="msg" id="bMsg"></div>
+    <section>
+      <h2>Attack thresholds</h2>
+      ${table([
+        { h: 'Item', f: r => esc(r.name || r.item_id) },
+        { h: 'Minimum attacks', n: 1, f: r => fmt(r.min_attacks) },
+        { h: '', f: r => `<button class="quiet warn" data-tremove="${r.item_id}">Remove</button>` },
+      ], thresholds, `<tr><td><input id="tItem" list="itemList" placeholder="Item"><datalist id="itemList"></datalist></td><td class="n"><input id="tMin" type="number" min="1" style="width:120px"></td><td><button class="primary" id="saveT">Save</button></td></tr>`)}
+      <div class="msg" id="tMsg"></div>
+    </section>
+    <section>
+      <h2>Discord and Torn</h2>
+      <form class="grid" id="cfgForm">
+        ${fields.map(([k, l]) => `<label for="c_${k}">${l}</label><input id="c_${k}" name="${k}" value="${esc(cfg[k])}">`).join('')}
+        <span></span><div><button class="primary" type="submit">Save settings</button></div>
+      </form>
+      <div class="msg" id="cMsg"></div>
+    </section>`;
+
+  document.querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', async () => {
+    await api(`/bankers/${b.dataset.remove}`, { method: 'DELETE' }); pages.settings();
+  }));
+  $('#saveKey').addEventListener('click', async () => {
+    try { const r = await api('/bankers', { method: 'POST', body: { key: $('#newKey').value.trim() } }); $('#bMsg').className = 'msg ok'; $('#bMsg').textContent = `Saved ${r.name} [${r.torn_id}]`; setTimeout(pages.settings, 800); }
+    catch (e) { $('#bMsg').className = 'msg'; $('#bMsg').textContent = e.message; }
+  });
+
+  let items = [];
+  $('#tItem').addEventListener('input', async e => {
+    const q = e.target.value.trim(); if (q.length < 2) return;
+    items = await api(`/items?q=${encodeURIComponent(q)}`);
+    $('#itemList').innerHTML = items.map(i => `<option value="${esc(i.name)}">`).join('');
+  });
+  $('#saveT').addEventListener('click', async () => {
+    const it = items.find(i => i.name.toLowerCase() === $('#tItem').value.trim().toLowerCase());
+    if (!it) { $('#tMsg').className = 'msg'; $('#tMsg').textContent = 'Pick an item from the list'; return; }
+    await api('/thresholds', { method: 'POST', body: { item_id: it.item_id, min_attacks: Number($('#tMin').value) } });
+    pages.settings();
+  });
+  document.querySelectorAll('[data-tremove]').forEach(b => b.addEventListener('click', async () => {
+    await api('/thresholds', { method: 'POST', body: { item_id: Number(b.dataset.tremove), min_attacks: 0 } }); pages.settings();
+  }));
+  $('#cfgForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const body = Object.fromEntries(new FormData(e.target).entries());
+    try { await api('/settings', { method: 'POST', body }); $('#cMsg').className = 'msg ok'; $('#cMsg').textContent = 'Saved'; }
+    catch (err) { $('#cMsg').className = 'msg'; $('#cMsg').textContent = err.message; }
+  });
+};
+
+(async () => {
+  try { await api('/dashboard'); showApp(); } catch { showLogin(); }
+})();
 </script>
 </body>
 </html>

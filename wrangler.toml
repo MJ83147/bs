@@ -2,6 +2,10 @@ name = "bs"
 main = "src/index.js"
 compatibility_date = "2026-08-01"
 
+routes = [
+  { pattern = "brainsurgeons.systoned.cc", custom_domain = true }
+]
+
 [assets]
 directory = "./public"
 binding = "ASSETS"
@@ -9,14 +13,10 @@ binding = "ASSETS"
 [triggers]
 crons = ["* * * * *"]
 
-routes = [
-  { pattern = "brainsurgeons.systoned.cc", custom_domain = true }
-]
-
 [[d1_databases]]
 binding = "DB"
 database_name = "bs"
-database_id = "REPLACE_AFTER_CREATE"
+database_id = "18e53848-8bb6-4ba2-a413-b3471d67a900"
 
 [vars]
 DISCORD_APP_ID = "1343283117313757246"
