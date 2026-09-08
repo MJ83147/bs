@@ -47,6 +47,18 @@ export function requestStatusEmbed(id, qty, shown, who, status, color) {
   return { title: `Request #${id}`, color, description: `**${qty} x ${shown}**\nfor ${who}`, fields: [{ name: 'Status', value: status, inline: false }] };
 }
 
+// Banker card buttons: Approve/Decline plus link buttons out to the member's
+// Torn profile and the banker's item inventory (for sending).
+function bankerButtons(id, tornId) {
+  const buttons = [
+    { type: 2, style: 3, label: 'Approve', custom_id: `approve:${id}` },
+    { type: 2, style: 4, label: 'Decline', custom_id: `decline:${id}` },
+  ];
+  if (tornId) buttons.push({ type: 2, style: 5, label: 'Profile', url: `https://www.torn.com/profiles.php?XID=${tornId}` });
+  buttons.push({ type: 2, style: 5, label: 'Inventory', url: 'https://www.torn.com/item.php' });
+  return [{ type: 1, components: buttons }];
+}
+
 function hasRole(interaction, roleId) {
   if (!roleId) return false;
   return (interaction.member?.roles || []).includes(roleId);
@@ -220,10 +232,7 @@ async function cmdRequest(interaction, env, cfg, ctx) {
       content: cfg.banker_role ? `<@&${cfg.banker_role}>` : undefined,
       allowed_mentions: cfg.banker_role ? { roles: [cfg.banker_role] } : undefined,
       embeds: [{ title: `Request #${id}`, description: `**${qty} x ${shown}**`, color: warnings.length ? COLORS.declined : COLORS.open, fields }],
-      components: [{ type: 1, components: [
-        { type: 2, style: 3, label: 'Approve', custom_id: `approve:${id}` },
-        { type: 2, style: 4, label: 'Decline', custom_id: `decline:${id}` },
-      ] }],
+      components: bankerButtons(id, tornId),
     });
     await env.DB.prepare('UPDATE requests SET public_message_id = ?, banker_message_id = ? WHERE id = ?').bind(pub.id, bank.id, id).run();
     await followup(env, interaction.token, { content: `Request #${id} submitted: ${qty} x ${shown}.` });
@@ -290,10 +299,7 @@ export async function repostRequest(env, cfg, req) {
     content: cfg.banker_role ? `<@&${cfg.banker_role}>` : undefined,
     allowed_mentions: cfg.banker_role ? { roles: [cfg.banker_role] } : undefined,
     embeds: [{ title: `Request #${req.id}`, description: `**${req.qty} x ${shown}**`, color: warnings.length ? COLORS.declined : COLORS.open, fields }],
-    components: [{ type: 1, components: [
-      { type: 2, style: 3, label: 'Approve', custom_id: `approve:${req.id}` },
-      { type: 2, style: 4, label: 'Decline', custom_id: `decline:${req.id}` },
-    ] }],
+    components: bankerButtons(req.id, req.torn_id),
   });
   await env.DB.prepare('UPDATE requests SET public_message_id = ?, banker_message_id = ? WHERE id = ?').bind(pub.id, bank.id, req.id).run();
 }
