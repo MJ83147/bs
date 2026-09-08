@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Item Categorizer</title>
+<style>
+  :root { --bg:#E6ECE9; --paper:#fff; --ink:#15211B; --muted:#5E6E66; --rule:#C9D3CE; --accent:#1E7360; --accent-ink:#fff; --warn:#B2372E; --soft:#F3F6F4; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, sans-serif; font-size:14px; color:var(--ink); background:var(--bg); }
+  h1 { font-size:22px; margin:0 0 4px; }
+  header { padding:20px 24px; border-bottom:1px solid var(--rule); background:var(--paper); }
+  .sub { color:var(--muted); margin:0; }
+  main { padding:20px 24px; display:grid; grid-template-columns: 1fr 360px; gap:24px; align-items:start; }
+  @media (max-width: 900px){ main { grid-template-columns:1fr; } }
+  .card { background:var(--paper); border:1px solid var(--rule); border-radius:6px; padding:16px; }
+  .card h2 { font-size:15px; margin:0 0 10px; }
+  input, select, textarea, button { font:inherit; color:inherit; }
+  input, select, textarea { padding:7px 9px; border:1px solid var(--rule); border-radius:4px; background:var(--paper); }
+  textarea { width:100%; font-family:ui-monospace, monospace; font-size:12px; }
+  button { cursor:pointer; border:1px solid var(--rule); border-radius:4px; background:var(--soft); padding:7px 12px; }
+  button.primary { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+  button.sm { padding:3px 8px; font-size:12px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+  .grow { flex:1; min-width:120px; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--rule); vertical-align:middle; }
+  th { color:var(--muted); font-weight:500; position:sticky; top:0; background:var(--paper); }
+  .list-wrap { max-height:60vh; overflow:auto; border:1px solid var(--rule); border-radius:4px; }
+  .muted { color:var(--muted); }
+  .chip { display:inline-block; margin:0 4px 4px 0; padding:2px 6px; border:1px solid var(--rule); border-radius:12px; font-size:12px; background:var(--soft); }
+  .chip button { border:0; background:none; padding:0 0 0 4px; color:var(--warn); cursor:pointer; }
+  .catblock { margin-bottom:14px; }
+  .catblock h3 { font-size:13px; margin:0 0 6px; }
+  .msg { color:var(--warn); min-height:1.2em; margin:6px 0 0; }
+  .pill { font-size:11px; color:var(--muted); }
+  code { background:var(--soft); padding:1px 4px; border-radius:3px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Item Categorizer</h1>
+  <p class="sub">Load Torn items, filter by type, click them into categories, then copy the output into the code.</p>
+</header>
+<main>
+  <div>
+    <div class="card" style="margin-bottom:16px;">
+      <h2>1. Load items</h2>
+      <div class="row">
+        <input id="key" class="grow" placeholder="Torn API key (public/limited is fine)">
+        <button class="primary" id="fetchBtn">Fetch from Torn</button>
+      </div>
+      <details>
+        <summary class="muted" style="cursor:pointer;">or paste the JSON from <code>api.torn.com/torn/?selections=items&amp;key=KEY</code></summary>
+        <div class="row" style="margin-top:8px;">
+          <textarea id="jsonIn" rows="4" placeholder='{"items":{"206":{"name":"Xanax","type":"Drug",...}, ...}}'></textarea>
+        </div>
+        <button id="loadJsonBtn">Load pasted JSON</button>
+      </details>
+      <p class="msg" id="loadMsg"></p>
+    </div>
+
+    <div class="card">
+      <h2>2. Assign <span class="pill" id="counts"></span></h2>
+      <div class="row">
+        <input id="search" class="grow" placeholder="Search name">
+        <select id="typeFilter"><option value="">All types</option></select>
+        <label class="muted"><input type="checkbox" id="unassignedOnly"> unassigned only</label>
+      </div>
+      <div class="row">
+        <span class="muted">Assign all listed to:</span>
+        <select id="bulkCat"></select>
+        <button id="bulkBtn">Apply to listed</button>
+      </div>
+      <div class="list-wrap">
+        <table>
+          <thead><tr><th>Item</th><th>Type</th><th style="width:190px;">Category</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card" style="margin-bottom:16px;">
+      <h2>Categories</h2>
+      <div id="cats"></div>
+      <button class="sm" id="clearAll">Clear all assignments</button>
+    </div>
+    <div class="card">
+      <h2>3. Output</h2>
+      <p class="muted" style="margin-top:0;">Paste this into the code.</p>
+      <div class="row"><button class="primary" id="copyBtn">Copy</button><span class="msg" id="copyMsg" style="color:var(--accent);"></span></div>
+      <textarea id="out" rows="16" readonly></textarea>
+    </div>
+  </div>
+</main>
+
+<script>
+const CATS = [
+  ['xanax', 'Xanax'],
+  ['otherdrugs', 'Other drugs'],
+  ['ecans', 'Ecans'],
+  ['med', 'Med kits'],
+  ['fhc', 'FHCs'],
+  ['temps', 'Temps'],
+  ['wrongblood', 'Wrong blood bag / ipecac'],
+];
+const labelOf = k => (CATS.find(c => c[0] === k) || [null, k])[1];
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+
+let items = [];                       // {id, name, type}
+let assign = {};                      // id -> category slug
+try { assign = JSON.parse(localStorage.getItem('bs-cats') || '{}'); } catch {}
+const save = () => localStorage.setItem('bs-cats', JSON.stringify(assign));
+
+function setItems(list) {
+  items = list.sort((a, b) => a.name.localeCompare(b.name));
+  const types = [...new Set(items.map(i => i.type).filter(Boolean))].sort();
+  $('#typeFilter').innerHTML = '<option value="">All types</option>' + types.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
+  render();
+}
+
+function loadFromData(data) {
+  if (data.error) throw new Error(`Torn API ${data.error.code}: ${data.error.error}`);
+  const obj = data.items || data;
+  const list = Object.entries(obj).map(([id, it]) => ({ id: Number(id), name: it.name, type: it.type || '' }));
+  if (!list.length) throw new Error('No items found in that JSON.');
+  setItems(list);
+}
+
+$('#fetchBtn').addEventListener('click', async () => {
+  const key = $('#key').value.trim();
+  if (!key) { $('#loadMsg').textContent = 'Enter an API key or paste JSON.'; return; }
+  $('#loadMsg').style.color = 'var(--muted)'; $('#loadMsg').textContent = 'Loading...';
+  try {
+    const r = await fetch(`https://api.torn.com/torn/?selections=items&key=${encodeURIComponent(key)}`);
+    loadFromData(await r.json());
+    $('#loadMsg').style.color = 'var(--accent)'; $('#loadMsg').textContent = `Loaded ${items.length} items.`;
+  } catch (e) {
+    $('#loadMsg').style.color = 'var(--warn)';
+    $('#loadMsg').textContent = `${e.message}. If this is a network/CORS block, paste the JSON instead.`;
+  }
+});
+
+$('#loadJsonBtn').addEventListener('click', () => {
+  try {
+    loadFromData(JSON.parse($('#jsonIn').value));
+    $('#loadMsg').style.color = 'var(--accent)'; $('#loadMsg').textContent = `Loaded ${items.length} items.`;
+  } catch (e) { $('#loadMsg').style.color = 'var(--warn)'; $('#loadMsg').textContent = e.message; }
+});
+
+function filtered() {
+  const q = $('#search').value.trim().toLowerCase();
+  const type = $('#typeFilter').value;
+  const un = $('#unassignedOnly').checked;
+  return items.filter(i =>
+    (!q || i.name.toLowerCase().includes(q)) &&
+    (!type || i.type === type) &&
+    (!un || !assign[i.id])
+  );
+}
+
+function catOptions(id) {
+  return `<select data-id="${id}">
+    <option value="">—</option>
+    ${CATS.map(([k, l]) => `<option value="${k}" ${assign[id] === k ? 'selected' : ''}>${l}</option>`).join('')}
+  </select>`;
+}
+
+function render() {
+  const list = filtered();
+  $('#rows').innerHTML = list.slice(0, 600).map(i =>
+    `<tr><td>${esc(i.name)}</td><td class="muted">${esc(i.type)}</td><td>${catOptions(i.id)}</td></tr>`
+  ).join('') || '<tr><td colspan="3" class="muted" style="padding:14px;">No items. Load items above, or adjust filters.</td></tr>';
+  if (list.length > 600) $('#rows').insertAdjacentHTML('beforeend', `<tr><td colspan="3" class="muted">Showing first 600 of ${list.length}. Filter to narrow.</td></tr>`);
+  $('#rows').querySelectorAll('select[data-id]').forEach(s => s.addEventListener('change', e => {
+    const id = Number(e.target.dataset.id);
+    if (e.target.value) assign[id] = e.target.value; else delete assign[id];
+    save(); renderCats(); renderOut(); updateCounts();
+  }));
+  renderCats(); renderOut(); updateCounts();
+}
+
+function updateCounts() {
+  const assigned = Object.keys(assign).length;
+  $('#counts').textContent = items.length ? `${assigned} of ${items.length} assigned` : '';
+}
+
+function renderCats() {
+  $('#cats').innerHTML = CATS.map(([k, l]) => {
+    const mine = items.filter(i => assign[i.id] === k);
+    return `<div class="catblock">
+      <h3>${l} <span class="pill">(${mine.length})</span></h3>
+      ${mine.length ? mine.map(i => `<span class="chip">${esc(i.name)}<button data-remove="${i.id}">✕</button></span>`).join('') : '<span class="muted">none</span>'}
+    </div>`;
+  }).join('');
+  $('#cats').querySelectorAll('button[data-remove]').forEach(b => b.addEventListener('click', () => {
+    delete assign[Number(b.dataset.remove)]; save(); render();
+  }));
+}
+
+function renderOut() {
+  const lines = ['const ITEM_CATEGORIES = {'];
+  for (const [k, l] of CATS) {
+    const ids = items.filter(i => assign[i.id] === k).map(i => i.id);
+    // include names as a trailing comment for readability
+    const names = items.filter(i => assign[i.id] === k).map(i => i.name).join(', ');
+    lines.push(`  ${k}: [${ids.join(', ')}],${names ? ` // ${l}: ${names}` : ` // ${l}`}`);
+  }
+  lines.push('};');
+  $('#out').value = lines.join('\n');
+}
+
+$('#bulkBtn').addEventListener('click', () => {
+  const cat = $('#bulkCat').value;
+  const list = filtered();
+  if (!cat || !list.length) return;
+  list.forEach(i => { assign[i.id] = cat; });
+  save(); render();
+});
+
+$('#clearAll').addEventListener('click', () => {
+  if (!confirm('Clear all category assignments?')) return;
+  assign = {}; save(); render();
+});
+
+$('#copyBtn').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText($('#out').value); $('#copyMsg').textContent = 'Copied'; setTimeout(() => $('#copyMsg').textContent = '', 1500); }
+  catch { $('#out').select(); document.execCommand('copy'); $('#copyMsg').textContent = 'Copied'; }
+});
+
+$('#search').addEventListener('input', render);
+$('#typeFilter').addEventListener('change', render);
+$('#unassignedOnly').addEventListener('change', render);
+$('#bulkCat').innerHTML = CATS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('');
+
+render();
+</script>
+</body>
+</html>

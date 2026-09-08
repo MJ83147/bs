@@ -1,10 +1,11 @@
 import { hmac, encrypt, decrypt } from './crypto.js';
 import * as db from './db.js';
 import * as torn from './torn.js';
-import { post } from './discord.js';
+import { post, repostRequest } from './discord.js';
 
 const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json' } });
 const fmt = (n) => Number(n || 0).toLocaleString('en-GB');
+const money = (n) => '$' + fmt(n);
 
 async function makeSession(env) {
   const exp = db.now() + 7 * 86400;
@@ -49,11 +50,27 @@ export async function handleApi(request, env, ctx) {
     ]);
     return json({ stock, funds, open: open.n, approved: approved.n });
   }
+  if (path === '/holdings') {
+    return json(await db.bankerHoldings(env.DB));
+  }
+  if (path === '/categories') {
+    return json({ low_stock: db.LOW_STOCK, categories: await db.categoryStock(env.DB) });
+  }
   if (path === '/ledger') {
     return json(await db.ledger(env.DB, { bankerId: url.searchParams.get('banker') ? Number(url.searchParams.get('banker')) : null, days: url.searchParams.get('days') ? Number(url.searchParams.get('days')) : null, limit: 500 }));
   }
   if (path === '/requests' && method === 'GET') {
     return json(await db.listRequests(env.DB, url.searchParams.get('status') || null));
+  }
+  const resendMatch = path.match(/^\/requests\/(\d+)\/resend$/);
+  if (resendMatch && method === 'POST') {
+    const id = Number(resendMatch[1]);
+    const req = await db.getRequest(env.DB, id);
+    if (!req) return json({ error: 'not found' }, 404);
+    if (req.status !== 'open') return json({ error: `request is ${req.status}` }, 400);
+    try { await repostRequest(env, cfg, req); }
+    catch (e) { return json({ error: e.message }, 400); }
+    return json({ ok: true });
   }
   const reqAction = path.match(/^\/requests\/(\d+)\/(decline|cancel)$/);
   if (reqAction && method === 'POST') {
@@ -62,7 +79,7 @@ export async function handleApi(request, env, ctx) {
     const req = await db.getRequest(env.DB, id);
     if (!req) return json({ error: 'not found' }, 404);
     if (['fulfilled', 'declined'].includes(req.status)) return json({ error: `already ${req.status}` }, 400);
-    await env.DB.prepare(`UPDATE requests SET status = 'declined', decline_reason = ?, updated_at = ? WHERE id = ?`).bind(reason, db.now(), id).run();
+    await env.DB.prepare(`UPDATE requests SET status = 'declined', decline_reason = ?, handled_by = ?, updated_at = ? WHERE id = ?`).bind(reason, 'Council site', db.now(), id).run();
     ctx.waitUntil((async () => {
       const suffix = reason ? ` Reason: ${reason}` : '';
       if (cfg.requests_channel) await post(env, cfg.requests_channel, `<@${req.discord_id}> request #${id} declined via council site.${suffix}`);
@@ -106,6 +123,49 @@ export async function handleApi(request, env, ctx) {
   }
   if (path === '/items') {
     return json(await db.searchItems(env.DB, url.searchParams.get('q') || '', 50));
+  }
+
+  if (path === '/contribute' && method === 'POST') {
+    const { banker_id, item_id, qty, cash } = await request.json();
+    const banker = await env.DB.prepare('SELECT torn_id, name FROM bankers WHERE torn_id = ?').bind(Number(banker_id)).first();
+    if (!banker) return json({ error: 'banker not found' }, 400);
+    const t = db.now();
+    const ins = env.DB.prepare(`INSERT INTO transactions (log_id, banker_id, direction, type, item_id, qty, value_at_time, counterparty_id, counterparty_name, message, timestamp, kind)
+      VALUES (?, ?, 'in', ?, ?, ?, ?, ?, ?, 'contribution', ?, 'donation')`);
+    const recorded = [];
+    if (item_id && Number(qty) > 0) {
+      const item = await db.getItem(env.DB, Number(item_id));
+      if (!item) return json({ error: 'item not found' }, 400);
+      const value = (item.market_value || 0) * Number(qty);
+      await ins.bind(`contrib:${crypto.randomUUID()}`, banker.torn_id, 'item', item.item_id, Number(qty), value, banker.torn_id, banker.name, t).run();
+      recorded.push(`${fmt(Number(qty))} x ${item.name}`);
+    }
+    if (Number(cash) > 0) {
+      await ins.bind(`contrib:${crypto.randomUUID()}`, banker.torn_id, 'cash', null, Number(cash), Number(cash), banker.torn_id, banker.name, t).run();
+      recorded.push(money(Number(cash)));
+    }
+    if (!recorded.length) return json({ error: 'give an item and qty, or a cash amount' }, 400);
+    ctx.waitUntil((async () => {
+      if (cfg.log_channel) { try { await post(env, cfg.log_channel, `Contribution: ${recorded.join(' and ')} from ${banker.name} [${banker.torn_id}]`); } catch (e) { console.log(e.message); } }
+    })());
+    return json({ ok: true, balance: (await db.funds(env.DB)).balance });
+  }
+
+  if (path === '/usage' && method === 'POST') {
+    const { banker_id, item_id, qty } = await request.json();
+    const banker = await env.DB.prepare('SELECT torn_id, name FROM bankers WHERE torn_id = ?').bind(Number(banker_id)).first();
+    if (!banker) return json({ error: 'banker not found' }, 400);
+    if (!item_id || Number(qty) < 1) return json({ error: 'pick an item and quantity' }, 400);
+    const item = await db.getItem(env.DB, Number(item_id));
+    if (!item) return json({ error: 'item not found' }, 400);
+    const value = (item.market_value || 0) * Number(qty);
+    await env.DB.prepare(`INSERT INTO transactions (log_id, banker_id, direction, type, item_id, qty, value_at_time, counterparty_id, counterparty_name, message, timestamp, kind)
+      VALUES (?, ?, 'out', 'item', ?, ?, ?, ?, ?, 'usage', ?, 'usage')`)
+      .bind(`usage:${crypto.randomUUID()}`, banker.torn_id, item.item_id, Number(qty), value, banker.torn_id, banker.name, db.now()).run();
+    ctx.waitUntil((async () => {
+      if (cfg.log_channel) { try { await post(env, cfg.log_channel, `Usage: ${fmt(Number(qty))} x ${item.name} used by ${banker.name} [${banker.torn_id}]`); } catch (e) { console.log(e.message); } }
+    })());
+    return json({ ok: true, stock: await db.stockFor(env.DB, item.item_id) });
   }
 
   if (path === '/settings' && method === 'GET') return json(cfg);
@@ -160,12 +220,34 @@ export async function handleApi(request, env, ctx) {
     return json({ ok: true, balance: f.balance });
   }
 
+  if (path === '/suggest') {
+    const q = (url.searchParams.get('q') || '').trim();
+    if (q.length < 2) return json([]);
+    const like = `%${q}%`;
+    const [players, bankers, items] = await Promise.all([
+      env.DB.prepare(`SELECT torn_id AS id, name, 'player' AS kind FROM players WHERE name LIKE ? ORDER BY name LIMIT 8`).bind(like).all(),
+      env.DB.prepare(`SELECT torn_id AS id, name, 'banker' AS kind FROM bankers WHERE active = 1 AND name LIKE ? ORDER BY name LIMIT 5`).bind(like).all(),
+      env.DB.prepare(`SELECT item_id AS id, name, 'item' AS kind FROM items WHERE name LIKE ? ORDER BY name LIMIT 8`).bind(like).all(),
+    ]);
+    const seen = new Set();
+    const out = [];
+    for (const r of [...players.results, ...bankers.results, ...items.results]) {
+      const dedupe = `${r.kind}:${r.name.toLowerCase()}`;
+      if (seen.has(dedupe)) continue;
+      seen.add(dedupe);
+      out.push(r);
+    }
+    return json(out);
+  }
+
   if (path === '/search') {
     const q = (url.searchParams.get('q') || '').trim();
     if (!q) return json({ error: 'empty' }, 400);
     if (/^\d+$/.test(q)) {
       const tornId = Number(q);
-      const name = (await env.DB.prepare('SELECT name FROM players WHERE torn_id = ?').bind(tornId).first())?.name || null;
+      const name = (await env.DB.prepare('SELECT name FROM players WHERE torn_id = ?').bind(tornId).first())?.name
+        || (await env.DB.prepare('SELECT name FROM bankers WHERE torn_id = ?').bind(tornId).first())?.name
+        || null;
       return json({ type: 'player', torn_id: tornId, name, ...(await db.playerHistory(env.DB, tornId)) });
     }
     const item = await db.findItemByName(env.DB, q) || (await db.searchItems(env.DB, q, 1))[0];
@@ -173,7 +255,11 @@ export async function handleApi(request, env, ctx) {
       const full = await db.getItem(env.DB, item.item_id);
       return json({ type: 'item', item: full, ...(await db.itemHistory(env.DB, item.item_id)) });
     }
-    const player = await env.DB.prepare('SELECT torn_id, name FROM players WHERE lower(name) = lower(?)').bind(q).first();
+    const like = `%${q}%`;
+    const player = await env.DB.prepare('SELECT torn_id, name FROM players WHERE lower(name) = lower(?)').bind(q).first()
+      || await env.DB.prepare('SELECT torn_id, name FROM bankers WHERE lower(name) = lower(?)').bind(q).first()
+      || await env.DB.prepare('SELECT torn_id, name FROM players WHERE name LIKE ? ORDER BY name LIMIT 1').bind(like).first()
+      || await env.DB.prepare('SELECT torn_id, name FROM bankers WHERE active = 1 AND name LIKE ? ORDER BY name LIMIT 1').bind(like).first();
     if (player) return json({ type: 'player', torn_id: player.torn_id, name: player.name, ...(await db.playerHistory(env.DB, player.torn_id)) });
     return json({ type: 'none' });
   }
@@ -190,7 +276,13 @@ export async function handleApi(request, env, ctx) {
       let attacks = null, score = null;
       if (key) { try { const c = await torn.fetchCompetition(key, r.torn_id); attacks = c.attacks ?? null; score = c.score ?? null; } catch {} }
       if (attacks !== null && attacks >= minAttacks) continue;
-      out.push({ ...r, attacks, score, value_per_attack: attacks ? Math.round(r.value_received / attacks) : null });
+      const reasons = [];
+      if (attacks === null) reasons.push('Attack count could not be read');
+      else reasons.push(`Only ${fmt(attacks)} attacks (min ${fmt(minAttacks)})`);
+      if (r.fulfilled >= minRequests && minRequests > 0) reasons.push(`${fmt(r.fulfilled)} requests fulfilled`);
+      if (r.value_received > 0 && r.value_donated === 0) reasons.push('Received but never donated');
+      else if (r.value_donated > 0 && r.value_received > r.value_donated * 3) reasons.push(`Received ${money(r.value_received)} vs ${money(r.value_donated)} donated`);
+      out.push({ ...r, attacks, score, reasons, value_per_attack: attacks ? Math.round(r.value_received / attacks) : null });
     }
     out.sort((a, b) => (b.value_received - a.value_received));
     return json({ min_attacks: minAttacks, min_requests: minRequests, flagged: out });

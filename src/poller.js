@@ -1,7 +1,8 @@
 import { decrypt } from './crypto.js';
 import * as db from './db.js';
 import * as torn from './torn.js';
-import { post, edit } from './discord.js';
+import { post, edit, COLORS, requestStatusEmbed } from './discord.js';
+import { categoryOfItem } from './categories.js';
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-GB');
 const money = (n) => '$' + fmt(n);
@@ -106,17 +107,18 @@ export async function poll(env) {
         const logId = rows.length > 1 ? `${entry.id}:${i}` : entry.id;
         let requestId = null;
         if (kind === 'send' && type === 'item') {
+          const cat = categoryOfItem(r.item_id);
           const req = await env.DB.prepare(`SELECT id, discord_id, public_message_id, banker_message_id, torn_name FROM requests
-            WHERE status = 'approved' AND torn_id = ? AND item_id = ? AND (banker_id = ? OR banker_id IS NULL)
-            ORDER BY created_at ASC LIMIT 1`).bind(counterpartyId, r.item_id, banker.torn_id).first();
+            WHERE status = 'approved' AND torn_id = ? AND (banker_id = ? OR banker_id IS NULL)
+              AND (item_id = ? OR (item_id IS NULL AND category = ?))
+            ORDER BY created_at ASC LIMIT 1`).bind(counterpartyId, banker.torn_id, r.item_id, cat).first();
           if (req) {
             requestId = req.id;
-            await env.DB.prepare(`UPDATE requests SET status = 'fulfilled', banker_id = ?, updated_at = ? WHERE id = ?`).bind(banker.torn_id, db.now(), req.id).run();
-            const line = `Request #${req.id}: ${fmt(r.qty)} x ${r.name} for ${req.torn_name}\nStatus: fulfilled, sent by ${banker.name}`;
+            await env.DB.prepare(`UPDATE requests SET status = 'fulfilled', banker_id = ?, item_id = ?, handled_by = ?, updated_at = ? WHERE id = ?`).bind(banker.torn_id, r.item_id, banker.name, db.now(), req.id).run();
+            const done = requestStatusEmbed(req.id, fmt(r.qty), r.name, req.torn_name, `Fulfilled, sent by ${banker.name}`, COLORS.fulfilled);
             try {
-              if (req.public_message_id) await edit(env, cfg.requests_channel, req.public_message_id, line);
-              await post(env, cfg.requests_channel, `<@${req.discord_id}> request #${req.id} fulfilled. ${banker.name} sent ${fmt(r.qty)} x ${r.name}.`);
-              if (req.banker_message_id) await edit(env, cfg.bankers_channel, req.banker_message_id, { content: line, components: [] });
+              if (req.public_message_id) await edit(env, cfg.requests_channel, req.public_message_id, { content: `<@${req.discord_id}>`, embeds: [done] });
+              if (req.banker_message_id) await edit(env, cfg.bankers_channel, req.banker_message_id, { embeds: [done], components: [] });
             } catch (e) { console.log(e.message); }
           }
         }
@@ -127,12 +129,11 @@ export async function poll(env) {
 
         if (cfg.log_channel) {
           const what = type === 'cash' ? money(r.qty) : `${fmt(r.qty)} x ${r.name}`;
-          let text;
-          if (kind === 'donation') text = `Donation: ${what} from ${counterpartyName} [${counterpartyId}] to ${banker.name}`;
-          else if (kind === 'send') text = `Sent: ${what} from ${banker.name} to ${counterpartyName} [${counterpartyId}]${requestId ? ` (request #${requestId})` : ''}`;
-          else text = `Transfer: ${what} ${direction === 'out' ? 'from' : 'to'} ${banker.name} ${direction === 'out' ? 'to' : 'from'} ${counterpartyName}`;
-          if (kind === 'transfer' && direction === 'in') text = null;
-          if (text) { try { await post(env, cfg.log_channel, text); } catch (e) { console.log(e.message); } }
+          let box;
+          if (kind === 'donation') box = { title: 'Donation', color: COLORS.donation, description: `${what}\nfrom **${counterpartyName}** [${counterpartyId}] to ${banker.name}` };
+          else if (kind === 'send') box = { title: 'Sent', color: COLORS.sent, description: `${what}\nfrom ${banker.name} to **${counterpartyName}** [${counterpartyId}]${requestId ? ` (request #${requestId})` : ''}` };
+          else if (direction === 'out') box = { title: 'Transfer', color: COLORS.transfer, description: `${what}\nfrom ${banker.name} to **${counterpartyName}**` };
+          if (box) { try { await post(env, cfg.log_channel, { embeds: [box] }); } catch (e) { console.log(e.message); } }
         }
       }
     }
