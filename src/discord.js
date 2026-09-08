@@ -180,10 +180,11 @@ async function cmdRequest(interaction, env, cfg, ctx) {
       VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`).bind(discordId, tornId, tornName, item?.item_id ?? null, category, qty, attacks, t, t).run();
     const id = ins.meta.last_row_id;
 
-    let totalReqs = 0, fulfilledReqs = 0;
+    let totalReqs = 0, fulfilledReqs = 0, history = [];
     if (tornId) {
       const c = await env.DB.prepare(`SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN status = 'fulfilled' THEN 1 ELSE 0 END), 0) AS fulfilled FROM requests WHERE torn_id = ?`).bind(tornId).first();
       totalReqs = c?.total || 0; fulfilledReqs = c?.fulfilled || 0;
+      history = (await env.DB.prepare(`SELECT r.id, r.qty, r.status, r.category, i.name AS item_name FROM requests r LEFT JOIN items i ON i.item_id = r.item_id WHERE r.torn_id = ? AND r.id != ? ORDER BY r.created_at DESC LIMIT 5`).bind(tornId, id).all()).results;
     }
     const who = tornId ? `${tornName} [${tornId}]` : tornName;
     const shown = item ? item.name : `${label} (any)`;
@@ -200,6 +201,7 @@ async function cmdRequest(interaction, env, cfg, ctx) {
       );
     }
     fields.push({ name: 'Requests', value: `${fmt(totalReqs)} total, ${fmt(fulfilledReqs)} fulfilled`, inline: false });
+    if (history.length) fields.push({ name: 'Recent requests', value: history.map(h => `\`#${h.id}\` ${fmt(h.qty)} x ${reqLabel(h)} — ${h.status}`).join('\n').slice(0, 1024), inline: false });
     const warnings = [];
     if (threshold && attacks !== null && attacks < threshold.min_attacks) {
       warnings.push(`Below threshold of ${fmt(threshold.min_attacks)} attacks for ${item.name}.`);
@@ -243,10 +245,11 @@ export async function repostRequest(env, cfg, req) {
   const stockQty = req.item_id ? await db.stockFor(env.DB, req.item_id) : await db.stockForItems(env.DB, itemsInCategory(req.category));
   const attacks = req.attacks_at_request;
 
-  let totalReqs = 0, fulfilledReqs = 0;
+  let totalReqs = 0, fulfilledReqs = 0, history = [];
   if (req.torn_id) {
     const c = await env.DB.prepare(`SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN status = 'fulfilled' THEN 1 ELSE 0 END), 0) AS fulfilled FROM requests WHERE torn_id = ?`).bind(req.torn_id).first();
     totalReqs = c?.total || 0; fulfilledReqs = c?.fulfilled || 0;
+    history = (await env.DB.prepare(`SELECT r.id, r.qty, r.status, r.category, i.name AS item_name FROM requests r LEFT JOIN items i ON i.item_id = r.item_id WHERE r.torn_id = ? AND r.id != ? ORDER BY r.created_at DESC LIMIT 5`).bind(req.torn_id, req.id).all()).results;
   }
 
   let profile = null;
@@ -268,6 +271,7 @@ export async function repostRequest(env, cfg, req) {
     );
   }
   fields.push({ name: 'Requests', value: `${fmt(totalReqs)} total, ${fmt(fulfilledReqs)} fulfilled`, inline: false });
+  if (history.length) fields.push({ name: 'Recent requests', value: history.map(h => `\`#${h.id}\` ${fmt(h.qty)} x ${reqLabel(h)} — ${h.status}`).join('\n').slice(0, 1024), inline: false });
 
   const warnings = [];
   if (req.item_id) {
