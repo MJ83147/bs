@@ -441,10 +441,22 @@ async function matchBanker(env, interaction) {
   return env.DB.prepare('SELECT torn_id, name FROM bankers WHERE torn_id = ?').bind(Number(m[1])).first();
 }
 
+// Walk a modal-submit component tree and pull the value for a given input.
+// Discord may return text inputs bare, inside an action row, or wrapped in a
+// Label component, so search recursively rather than at a fixed depth.
+function modalValue(components, customId) {
+  for (const c of components || []) {
+    if (c.custom_id === customId && c.value !== undefined) return c.value;
+    const nested = c.components || (c.component ? [c.component] : null);
+    if (nested) { const v = modalValue(nested, customId); if (v !== undefined) return v; }
+  }
+  return undefined;
+}
+
 async function modal(interaction, env, cfg, ctx) {
   const [action, idStr] = interaction.data.custom_id.split(':');
   if (action !== 'decline_modal') return reply('Unknown modal.');
-  const reason = interaction.data.components?.[0]?.components?.[0]?.value || '';
+  const reason = modalValue(interaction.data.components, 'reason') || '';
   return cmdDecline(interaction, env, cfg, ctx, Number(idStr), reason, true);
 }
 
