@@ -31,6 +31,21 @@ export async function fetchBasic(key, tornId) {
   return { id: data.player_id, name: data.name };
 }
 
+// Level + age come from the profile selection; net worth from the personalstats
+// networth category (Torn split personalstats into categories in Dec 2024).
+// All three are publicly viewable for any player. Net worth shape is parsed
+// defensively since the category payload can be a number or a breakdown object.
+export async function fetchProfile(key, tornId) {
+  const data = await get(`${BASE}/user/${tornId}?selections=profile,personalstats&cat=networth&key=${key}`);
+  const ps = data.personalstats || {};
+  const nw = ps.networth;
+  let networth = null;
+  if (typeof nw === 'number') networth = nw;
+  else if (nw && typeof nw === 'object') networth = nw.total ?? nw.networth ?? null;
+  else if (typeof ps.networthtotal === 'number') networth = ps.networthtotal;
+  return { level: data.level ?? null, age: data.age ?? null, networth };
+}
+
 export async function fetchItems(key) {
   const data = await get(`${BASE}/torn/?selections=items&key=${key}`);
   return Object.entries(data.items).map(([id, it]) => ({
