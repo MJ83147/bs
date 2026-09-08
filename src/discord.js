@@ -160,16 +160,15 @@ async function cmdRequest(interaction, env, cfg, ctx) {
       }
     }
 
-    // Energy double-dip: block a repeat energy request when no attacks have been made since the last one.
+    // Energy double-dip: no longer auto-declined. Flag it as a card warning when
+    // no attacks have been made since the member's last energy request.
+    let doubleDip = false;
     if (ENERGY_CATEGORIES.includes(category) && tornId && attacks !== null) {
       const ph = ENERGY_CATEGORIES.map(() => '?').join(',');
       const prior = await env.DB.prepare(
         `SELECT attacks_at_request FROM requests WHERE torn_id = ? AND category IN (${ph}) AND status != 'declined' AND attacks_at_request IS NOT NULL ORDER BY created_at DESC LIMIT 1`
       ).bind(tornId, ...ENERGY_CATEGORIES).first();
-      if (prior && attacks <= prior.attacks_at_request) {
-        await followup(env, interaction.token, { content: `Auto-declined: please use your previous energy request before requesting more. You have made no attacks since it.` });
-        return;
-      }
+      if (prior && attacks <= prior.attacks_at_request) doubleDip = true;
     }
 
     const itemLabel = item ? item.name : label;
@@ -207,6 +206,7 @@ async function cmdRequest(interaction, env, cfg, ctx) {
       warnings.push(`Below threshold of ${fmt(threshold.min_attacks)} attacks for ${item.name}.`);
     }
     if (stockQty < qty) warnings.push(`Only ${fmt(stockQty)} in stock.`);
+    if (doubleDip) warnings.push(`No attacks made since their last energy request (possible double-dip).`);
     if (tornId) {
       const minA = Number(cfg.leech_min_attacks || 0), minR = Number(cfg.leech_min_requests || 0);
       if (attacks !== null && attacks < minA && fulfilledReqs >= minR) {
