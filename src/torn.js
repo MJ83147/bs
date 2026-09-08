@@ -31,28 +31,24 @@ export async function fetchBasic(key, tornId) {
   return { id: data.player_id, name: data.name };
 }
 
-// Level + age come from the profile selection; net worth from the personalstats
-// networth category (Torn split personalstats into categories in Dec 2024).
-// All three are publicly viewable for any player. Net worth shape is parsed
-// defensively since the category payload can be a number or a breakdown object.
-function parseNetworth(ps) {
-  const nw = (ps || {}).networth;
+// Level + age come from the profile selection; net worth from the dedicated
+// networth selection, whose payload is a breakdown object with a `total`.
+function parseNetworth(nw) {
   if (typeof nw === 'number') return nw;
   if (nw && typeof nw === 'object') return nw.total ?? nw.networth ?? null;
-  if (typeof (ps || {}).networthtotal === 'number') return ps.networthtotal;
   return null;
 }
 
 export async function fetchProfile(key, tornId) {
   try {
-    const data = await get(`${BASE}/user/${tornId}?selections=profile,personalstats&cat=networth&key=${key}`);
-    return { level: data.level ?? null, age: data.age ?? null, networth: parseNetworth(data.personalstats) };
+    const data = await get(`${BASE}/user/${tornId}?selections=profile,networth&key=${key}`);
+    return { level: data.level ?? null, age: data.age ?? null, networth: parseNetworth(data.networth) };
   } catch {
     // Combined call failed; fetch profile alone so level/age still render, then
     // try networth on its own so one failing selection never hides the others.
     const p = await get(`${BASE}/user/${tornId}?selections=profile&key=${key}`);
     let networth = null;
-    try { networth = parseNetworth((await get(`${BASE}/user/${tornId}?selections=personalstats&cat=networth&key=${key}`)).personalstats); } catch {}
+    try { networth = parseNetworth((await get(`${BASE}/user/${tornId}?selections=networth&key=${key}`)).networth); } catch {}
     return { level: p.level ?? null, age: p.age ?? null, networth };
   }
 }
