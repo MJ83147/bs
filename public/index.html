@@ -80,9 +80,7 @@
     }
 
     header {
-      padding: 28px 40px 0;
-      max-width: 1440px;
-      margin: 0 auto;
+      padding: 28px clamp(24px, 3.5vw, 72px) 0;
     }
 
     .brand {
@@ -142,9 +140,7 @@
     }
 
     main {
-      padding: 32px 40px 80px;
-      max-width: 1440px;
-      margin: 0 auto;
+      padding: 32px clamp(24px, 3.5vw, 72px) 80px;
     }
 
     h2 {
@@ -349,17 +345,50 @@
       background: var(--warn);
     }
 
-    .chart-grid {
+    /* Charts sized to their content: the two substantial charts (ranked bars,
+       heatmap) get real room; the two summary charts (outcomes, volume) sit
+       stacked in a narrow side column at roughly half their height. */
+    .charts {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: minmax(0, 1fr) minmax(470px, 560px) minmax(280px, 340px);
       gap: 16px;
-      align-content: start;
+      align-items: stretch;
       margin-bottom: 34px;
     }
 
-    @media (max-width: 720px) {
-      .chart-grid {
+    .c-side {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-width: 0;
+    }
+
+    .c-side > .chart {
+      flex: 1;
+    }
+
+    @media (max-width: 1120px) {
+      .charts {
+        grid-template-columns: minmax(0, 1fr) minmax(420px, 1fr);
+      }
+
+      .c-side {
+        grid-column: 1 / -1;
+        flex-direction: row;
+      }
+
+      .c-side > .chart {
+        flex: 1 1 0;
+      }
+    }
+
+    @media (max-width: 680px) {
+      .charts {
         grid-template-columns: 1fr;
+      }
+
+      .c-side {
+        flex-direction: column;
       }
     }
 
@@ -368,6 +397,15 @@
       border: 1px solid var(--rule);
       border-radius: 8px;
       padding: 16px 20px 18px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .chart-body {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
     }
 
     .chart h3 {
@@ -386,7 +424,7 @@
       display: block;
       width: 100%;
       height: auto;
-      max-height: 160px;
+      max-height: 120px;
       overflow: visible;
     }
 
@@ -750,10 +788,6 @@
         gap: 24px;
       }
 
-      .dash-grid {
-        grid-template-columns: 1fr;
-      }
-
       th,
       td {
         padding: 8px;
@@ -790,7 +824,6 @@
         <a href="#requests" data-page="requests">Requests</a>
         <a href="#funds" data-page="funds">Register</a>
         <a href="#totals" data-page="totals">Totals</a>
-        <a href="#team" data-page="team">Team status</a>
         <a href="#search" data-page="search">Search</a>
         <a href="#risk" data-page="risk">Risk</a>
         <a href="#settings" data-page="settings">Settings</a>
@@ -870,7 +903,7 @@
     // --- Dashboard charts. Crisp HTML/CSS for bars, heatmap and the status bar;
     // SVG only for the time series. Empty states are handled by each builder. ---
     function chartCard(title, sub, body) {
-      return `<div class="chart"><h3>${esc(title)}</h3><p class="sub">${esc(sub)}</p>${body}</div>`;
+      return `<div class="chart"><h3>${esc(title)}</h3><p class="sub">${esc(sub)}</p><div class="chart-body">${body}</div></div>`;
     }
 
     // Horizontal bars, biggest first. data: [{ label, n }].
@@ -953,11 +986,13 @@
       <div class="stat"><b>${fmt(d.open)}</b><span>Open requests</span></div>
       <div class="stat"><b>${fmt(d.approved)}</b><span>Pending send</span></div>
     </div>
-    <div class="chart-grid">
+    <div class="charts">
       ${chartCard('Most requested', 'Requests by category, all time. Keep the busiest categories stocked.', hbars(ins.most_requested))}
-      ${chartCard('Request outcomes', 'How every request has ended up.', statusBar(ins.status))}
       ${chartCard('Busiest time', 'When members request, by day and hour (Torn City Time). Darker means more requests.', heat(ins.heatmap))}
-      ${chartCard('Request volume', 'Requests per day over the last 30 days.', timeSeries(ins.volume))}
+      <div class="c-side">
+        ${chartCard('Request outcomes', 'How every request has ended up.', statusBar(ins.status))}
+        ${chartCard('Request volume', 'Requests per day, last 30 days.', timeSeries(ins.volume))}
+      </div>
     </div>
     <section>
       <h2>Stock</h2>

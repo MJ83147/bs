@@ -251,11 +251,23 @@
     }
 
     /* --- Roster --- */
+    .rgroup {
+      margin-top: 24px;
+    }
+
+    .rgroup h3 {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      color: var(--muted);
+      font-weight: 700;
+      margin: 0 0 10px;
+    }
+
     .roster {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
       gap: 10px;
-      margin-top: 16px;
     }
 
     .rperson {
@@ -454,7 +466,7 @@
         <div id="overview" class="scroll"></div>
         <div id="legend"></div>
       </div>
-      <div id="roster" class="roster"></div>
+      <div id="roster"></div>
     </main>
   </div>
 
@@ -502,7 +514,36 @@
       return out;
     }
 
-    let people = [];
+    // --- Support team roster. Add / remove names here; people pick their own name,
+    // they cannot type a new one. Order here is the order shown everywhere. ---
+    const ROSTER = [
+      { group: 'Leader', names: ['zuni'] },
+      { group: 'Vice', names: ['aaassh', 'dusche', 'systoned', 'yuki'] },
+      { group: 'Support staff', names: ['jesuus', 'lightor', 'owlvanna', 'strain', 'unique', 'mob'] },
+    ];
+    const ALL_NAMES = ROSTER.flatMap(g => g.names);
+
+    // Timezone options (context only; the grid itself is always TCT). Offsets ignore DST.
+    const TIMEZONES = [
+      'UTC / TCT',
+      'US Pacific (UTC-8)',
+      'US Mountain (UTC-7)',
+      'US Central (UTC-6)',
+      'US Eastern (UTC-5)',
+      'Brazil (UTC-3)',
+      'UK / Ireland (UTC+0)',
+      'Central Europe (UTC+1)',
+      'Eastern Europe (UTC+2)',
+      'Turkey / Moscow (UTC+3)',
+      'India (UTC+5:30)',
+      'China / Singapore (UTC+8)',
+      'Japan / Korea (UTC+9)',
+      'Australia East (UTC+10)',
+      'New Zealand (UTC+12)',
+    ];
+
+    let people = [];            // saved rows from the DB
+    const byName = n => people.find(p => p.name === n) || null;
 
     function showGate() { $('#gate').hidden = false; $('#app').hidden = true; }
     function showApp() { $('#gate').hidden = true; $('#app').hidden = false; load(); }
@@ -545,48 +586,58 @@
     }
 
     function renderRoster() {
-      if (!people.length) { $('#roster').innerHTML = ''; return; }
-      $('#roster').innerHTML = people.map(p => {
-        const hrs = (p.slots || '').split('').filter(c => c === '1').length;
-        const tz = p.timezone ? esc(p.timezone) : 'no timezone set';
+      if (!ALL_NAMES.length) { $('#roster').innerHTML = `<p class="empty">No team members configured yet.</p>`; return; }
+      const card = name => {
+        const p = byName(name);
+        const hrs = p ? (p.slots || '').split('').filter(c => c === '1').length : 0;
+        const meta = p ? `${p.timezone ? esc(p.timezone) : 'no timezone set'} · ${hrs} hr/wk` : 'not filled in yet';
         return `<div class="rperson">
-          <div><b>${esc(p.name)}</b><div class="meta">${tz} · ${hrs} hr/wk</div></div>
-          <button data-id="${p.id}">Edit</button>
+          <div><b>${esc(name)}</b><div class="meta">${meta}</div></div>
+          <button data-name="${esc(name)}">Edit</button>
         </div>`;
-      }).join('');
-      $('#roster').querySelectorAll('button[data-id]').forEach(b =>
-        b.addEventListener('click', () => openModal(people.find(p => p.id === Number(b.dataset.id)))));
+      };
+      $('#roster').innerHTML = ROSTER.map(g =>
+        `<div class="rgroup"><h3>${esc(g.group)}</h3><div class="roster">${g.names.map(card).join('')}</div></div>`).join('');
+      $('#roster').querySelectorAll('button[data-name]').forEach(b =>
+        b.addEventListener('click', () => openModal(b.dataset.name)));
     }
 
     // --- Editor modal ---
-    let editState = null; // { id, grid }
+    let editState = null; // { name, grid }
 
-    function openModal(person) {
-      editState = { id: person ? person.id : null, grid: person ? slotsToGrid(person.slots) : emptyGrid() };
-      const options = ['<option value="">— New person —</option>', ...people.map(p =>
-        `<option value="${p.id}"${person && person.id === p.id ? ' selected' : ''}>${esc(p.name)}</option>`)].join('');
+    // Load the saved data (or a blank grid) for `name` into the modal.
+    function loadPerson(back, name) {
+      const p = name ? byName(name) : null;
+      editState = { name: name || '', grid: p ? slotsToGrid(p.slots) : emptyGrid() };
+      $('#mTz', back).value = p ? (p.timezone || '') : '';
+      paintGrid(back);
+    }
+
+    function openModal(name) {
+      editState = { name: name || '', grid: emptyGrid() };
+      const whoOpts = ['<option value="">— Select your name —</option>', ...ROSTER.map(g =>
+        `<optgroup label="${esc(g.group)}">${g.names.map(n =>
+          `<option value="${esc(n)}"${n === name ? ' selected' : ''}>${esc(n)}</option>`).join('')}</optgroup>`)].join('');
+      const tzOpts = ['<option value="">— Select timezone —</option>', ...TIMEZONES.map(t =>
+        `<option value="${esc(t)}">${esc(t)}</option>`)].join('');
       const back = document.createElement('div');
       back.className = 'backdrop';
       back.innerHTML = `
         <div class="modal" role="dialog" aria-modal="true">
           <h2>Your availability</h2>
-          <p class="section-desc">Click or drag across the grid to mark the hours you're usually around, in TCT.</p>
+          <p class="section-desc">Pick your name, then click or drag across the grid to mark the hours you're usually around, in TCT.</p>
           <div class="frow">
             <label>Who are you?
-              <select id="mWho">${options}</select>
-            </label>
-            <label>Your name
-              <input id="mName" placeholder="Display name" value="${person ? esc(person.name) : ''}" maxlength="60">
+              <select id="mWho">${whoOpts}</select>
             </label>
             <label>Timezone (context only)
-              <input id="mTz" placeholder="e.g. US East, nights" value="${person ? esc(person.timezone) : ''}" maxlength="60">
+              <select id="mTz">${tzOpts}</select>
             </label>
           </div>
           <div class="scroll"><div class="egrid" id="mGrid"></div></div>
           <div class="modal-actions">
             <button class="quiet" id="mClearAll" type="button">Clear all</button>
             <span class="spacer"></span>
-            ${person ? '<button class="quiet warn" id="mDelete" type="button">Delete</button>' : ''}
             <button class="quiet" id="mCancel" type="button">Cancel</button>
             <button class="primary" id="mSave" type="button">Save</button>
           </div>
@@ -597,32 +648,18 @@
       const close = () => back.remove();
       back.addEventListener('mousedown', e => { if (e.target === back) close(); });
       $('#mCancel', back).addEventListener('click', close);
-      $('#mWho', back).addEventListener('change', e => {
-        const id = e.target.value ? Number(e.target.value) : null;
-        const p = people.find(x => x.id === id);
-        editState = { id, grid: p ? slotsToGrid(p.slots) : emptyGrid() };
-        $('#mName', back).value = p ? p.name : '';
-        $('#mTz', back).value = p ? (p.timezone || '') : '';
-        // Rebuild modal so the Delete button reflects the new selection.
-        close();
-        openModal(p || null);
-      });
+      $('#mWho', back).addEventListener('change', e => loadPerson(back, e.target.value));
       $('#mClearAll', back).addEventListener('click', () => { editState.grid = emptyGrid(); paintGrid(back); });
-      const del = $('#mDelete', back);
-      if (del) del.addEventListener('click', async () => {
-        if (!editState.id) return;
-        try { await api('/coverage/' + editState.id, { method: 'DELETE' }); } catch (err) { $('#mMsg', back).textContent = err.message; return; }
-        close(); await load();
-      });
       $('#mSave', back).addEventListener('click', async () => {
-        const name = $('#mName', back).value.trim();
-        if (!name) { $('#mMsg', back).textContent = 'Enter your name'; return; }
-        const body = { id: editState.id, name, timezone: $('#mTz', back).value.trim(), slots: gridToSlots(editState.grid) };
+        if (!editState.name) { $('#mMsg', back).textContent = 'Pick your name first'; return; }
+        const saved = byName(editState.name);
+        const body = { id: saved ? saved.id : null, name: editState.name, timezone: $('#mTz', back).value, slots: gridToSlots(editState.grid) };
         try { await api('/coverage/save', { method: 'POST', body }); } catch (err) { $('#mMsg', back).textContent = err.message; return; }
         close(); await load();
       });
 
       buildGrid(back);
+      if (name) loadPerson(back, name);
     }
 
     // Build the editable grid markup and wire click/drag painting.
