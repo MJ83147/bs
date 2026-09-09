@@ -1,6 +1,7 @@
 import { verifyDiscord, decrypt } from './crypto.js';
 import * as db from './db.js';
 import * as torn from './torn.js';
+import { commands } from './commands.js';
 import { CATEGORY_MODE, CATEGORY_LABELS, CATEGORY_KEYS, ENERGY_CATEGORIES, itemsInCategory, categoryOfItem } from './categories.js';
 
 const API = 'https://discord.com/api/v10';
@@ -29,6 +30,13 @@ const fmt = (n) => Number(n || 0).toLocaleString('en-GB');
 const money = (n) => '$' + fmt(n);
 const displayName = (i) => i.member?.nick || i.member?.user?.global_name || i.member?.user?.username || i.user?.username;
 const reqLabel = (r) => r.item_name || CATEGORY_LABELS[r.category] || r.category || 'items';
+
+// Preset quantities for the request flow's quantity dropdown (no free-text box,
+// so the flow is all selects with no "Submit" button).
+const QTY_PRESETS = [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 100];
+// Edit the current ephemeral message in place (type 7) as the member advances
+// through the category -> item -> quantity dropdowns.
+const updateMsg = (content, components = []) => json({ type: 7, data: { content, components } });
 
 // Shared embed colours so every "box" reads consistently across the bot.
 export const COLORS = {
@@ -68,6 +76,47 @@ async function bankerKey(env, cfg) {
   const bankers = await db.getBankers(env.DB);
   if (!bankers.length) return null;
   return decrypt(env.ENCRYPTION_KEY, bankers[0].encrypted_key);
+}
+
+// Register slash commands to the configured guild (guild commands update
+// instantly) and clear them from every other guild the bot is in, plus clear
+// the global set, so commands appear only in the treasury's own server and never
+// linger elsewhere or in a client cache. Called by the worker's /register route,
+// which uses the bot token already in env.
+export async function registerCommands(env) {
+  const app = env.DISCORD_APP_ID;
+  const target = env.DISCORD_GUILD_ID;
+  const guilds = await rest(env, 'GET', '/users/@me/guilds');
+  const results = [];
+  for (const guild of guilds) {
+    const body = guild.id === target ? commands : [];
+    const g = await rest(env, 'PUT', `/applications/${app}/guilds/${guild.id}/commands`, body);
+    results.push(`${guild.name} (${guild.id}): ${g.length} commands${guild.id === target ? '  <-- registered' : '  (cleared)'}`);
+  }
+  const cleared = await rest(env, 'PUT', `/applications/${app}/commands`, []);
+  return new Response(`OK. Target guild ${target}.\n${results.join('\n')}\nGlobal cleared (now ${cleared.length}). Reload Discord.`);
+}
+
+// Read-only: report which guilds the bot is in and what commands are registered
+// where, so we can see the real state instead of guessing about client caches.
+export async function debugCommands(env) {
+  const app = env.DISCORD_APP_ID;
+  const guilds = await rest(env, 'GET', '/users/@me/guilds');
+  const global = await rest(env, 'GET', `/applications/${app}/commands`);
+  const guildCmds = await rest(env, 'GET', `/applications/${app}/guilds/${env.DISCORD_GUILD_ID}/commands`);
+  const fmtCmds = (cs) => cs.map(c => `${c.name}[opts:${c.options?.length || 0}]`).join(', ') || '(none)';
+  const lines = [
+    `APP_ID: ${app}`,
+    `Configured GUILD_ID: ${env.DISCORD_GUILD_ID}`,
+    ``,
+    `Bot is in ${guilds.length} guild(s):`,
+    ...guilds.map(g => `  ${g.id}  ${g.name}${g.id === env.DISCORD_GUILD_ID ? '   <-- configured guild' : ''}`),
+    ``,
+    `GLOBAL commands (${global.length}): ${fmtCmds(global)}`,
+    ``,
+    `GUILD ${env.DISCORD_GUILD_ID} commands (${guildCmds.length}): ${fmtCmds(guildCmds)}`,
+  ];
+  return new Response(lines.join('\n'));
 }
 
 export async function handleInteraction(request, env, ctx) {
@@ -119,6 +168,7 @@ async function command(interaction, env, cfg, ctx) {
   const council = hasRole(interaction, cfg.council_role) || hasRole(interaction, cfg.banker_role);
   switch (name) {
     case 'request': return cmdRequest(interaction, env, cfg, ctx);
+    case 'request-item': return cmdRequest(interaction, env, cfg, ctx);
     case 'mystats': return cmdMyStats(interaction, env);
     case 'contribute': return cmdContribute(interaction, env, cfg, ctx);
     case 'stock': if (!council) return reply('Council or banker role required.'); return cmdStock(interaction, env);
@@ -137,56 +187,81 @@ async function resolveItem(env, value) {
   return db.findItemByName(env.DB, value);
 }
 
-// /request opens a form (modal) with a category dropdown and a quantity box, so members
-// never have to type slash-command options. Specific categories get an item picker after.
+// /request walks the member through dropdowns in one ephemeral message: category
+// -> item (only when the category lets you pick one) -> quantity. Each step is a
+// select menu that replaces the previous one, so there is no "Submit" button; the
+// quantity pick creates the request. single/bucket categories skip the item step.
 function cmdRequest(interaction, env, cfg) {
   if (!cfg.requests_channel || !cfg.bankers_channel) return reply('Requests are not set up yet.');
-  return json({ type: 9, data: {
-    custom_id: 'req_form',
-    title: 'Request items',
-    components: [
-      { type: 18, label: 'What do you need', component: { type: 3, custom_id: 'category', placeholder: 'Pick a category', options: CATEGORY_KEYS.map(k => ({ label: CATEGORY_LABELS[k], value: k })) } },
-      { type: 18, label: 'Quantity', component: { type: 4, custom_id: 'qty', style: 1, value: '1', required: true, max_length: 6 } },
-    ],
+  return json({ type: 4, data: {
+    flags: EPHEMERAL,
+    content: 'What do you need?',
+    components: [{ type: 1, components: [{ type: 3, custom_id: 'req_cat', placeholder: 'Pick a category',
+      options: CATEGORY_KEYS.map(k => ({ label: CATEGORY_LABELS[k], value: k })) }] }],
   } });
 }
 
-// Step 2 for specific categories: after the form, pick the exact item (qty carried in the id).
-async function requestForm(interaction, env, cfg, ctx) {
-  if (!cfg.requests_channel || !cfg.bankers_channel) return reply('Requests are not set up yet.');
-  const category = modalValue(interaction.data.components, 'category');
-  const mode = CATEGORY_MODE[category];
-  if (!mode) return reply('Unknown category.');
-  const qty = Math.max(1, Math.floor(Number(modalValue(interaction.data.components, 'qty')) || 1));
-
-  if (mode !== 'specific') {
-    const item = mode === 'single' ? await db.getItem(env.DB, itemsInCategory(category)[0]) : null;
-    return submitRequest(interaction, env, cfg, ctx, { category, item, qty });
+// One or more item dropdowns for a category. A select menu holds at most 25
+// options and some categories have more, so split across rows (up to 5) with a
+// distinct custom_id per row (Discord requires unique ids within a message).
+function itemSelectRows(category, items) {
+  const rows = [];
+  for (let i = 0; i < items.length && rows.length < 5; i += 25) {
+    const chunk = items.slice(i, i + 25);
+    rows.push({ type: 1, components: [{ type: 3, custom_id: `req_it:${category}:${rows.length}`,
+      placeholder: rows.length === 0 ? 'Pick an item' : 'Pick an item (more)',
+      options: chunk.map(it => ({ label: it.name.slice(0, 100), value: String(it.item_id) })) }] });
   }
+  return rows;
+}
 
+// The quantity dropdown. Carries the chosen category and item id in its custom_id
+// so no state is stored between interactions.
+function qtyRow(category, itemId) {
+  return [{ type: 1, components: [{ type: 3, custom_id: `req_qty:${category}:${itemId}`, placeholder: 'How many?',
+    options: QTY_PRESETS.map(n => ({ label: String(n), value: String(n) })) }] }];
+}
+
+// Category chosen. specific -> item dropdown; single/bucket -> straight to quantity.
+async function requestCategory(interaction, env, cfg) {
+  const category = interaction.data.values?.[0];
+  const mode = CATEGORY_MODE[category];
+  if (!mode) return updateMsg('Unknown category.');
+  if (mode !== 'specific') return updateMsg(`How many **${CATEGORY_LABELS[category]}**?`, qtyRow(category, ''));
   const ids = itemsInCategory(category);
   const ph = ids.map(() => '?').join(',');
   const items = (await env.DB.prepare(`SELECT item_id, name FROM items WHERE item_id IN (${ph}) ORDER BY name`).bind(...ids).all()).results;
-  if (!items.length) return reply('No items configured for this category yet.');
-  const options = items.slice(0, 25).map(i => ({ label: i.name.slice(0, 100), value: String(i.item_id) }));
-  return json({ type: 4, data: {
-    flags: EPHEMERAL,
-    content: `Pick a ${CATEGORY_LABELS[category]} item (quantity ${fmt(qty)}):`,
-    components: [{ type: 1, components: [{ type: 3, custom_id: `req_item:${category}:${qty}`, placeholder: 'Pick an item', options }] }],
-  } });
+  if (!items.length) return updateMsg(`No items configured for ${CATEGORY_LABELS[category]} yet.`);
+  return updateMsg(`Pick a ${CATEGORY_LABELS[category]} item:`, itemSelectRows(category, items));
 }
 
-// Item chosen from the picker. Create the request.
-async function requestItemPicked(interaction, env, cfg, ctx) {
-  const [, category, qtyStr] = interaction.data.custom_id.split(':');
-  const qty = Math.max(1, Math.floor(Number(qtyStr) || 1));
+// Item chosen for a specific category -> quantity dropdown.
+async function requestItem(interaction, env, cfg) {
+  const category = interaction.data.custom_id.split(':')[1];
   const item = await db.getItem(env.DB, Number(interaction.data.values?.[0]));
-  if (!item || categoryOfItem(item.item_id) !== category) return reply(`That item is not in ${CATEGORY_LABELS[category] || 'this category'}.`);
+  if (!item || categoryOfItem(item.item_id) !== category) return updateMsg(`That item is not in ${CATEGORY_LABELS[category] || 'this category'}.`);
+  return updateMsg(`How many **${item.name}**?`, qtyRow(category, item.item_id));
+}
+
+// Quantity chosen -> create the request. Resolves the item from mode + custom_id.
+async function requestQty(interaction, env, cfg, ctx) {
+  const [, category, itemIdStr] = interaction.data.custom_id.split(':');
+  const mode = CATEGORY_MODE[category];
+  if (!mode) return updateMsg('Unknown category.');
+  const qty = Math.max(1, Math.floor(Number(interaction.data.values?.[0]) || 1));
+  let item = null;
+  if (mode === 'specific') {
+    item = await db.getItem(env.DB, Number(itemIdStr));
+    if (!item || categoryOfItem(item.item_id) !== category) return updateMsg('That item is no longer valid, try again.');
+  } else if (mode === 'single') {
+    item = await db.getItem(env.DB, itemsInCategory(category)[0]);
+  }
   return submitRequest(interaction, env, cfg, ctx, { category, item, qty });
 }
 
-// Core request creation, shared by the request form and the item picker. Defers the reply
-// and does the slow Torn lookups + banker card in the background.
+// Core request creation, called from the quantity dropdown. Replaces the dropdown
+// message with a working note, does the slow Torn lookups + banker card in the
+// background, then edits that same message with the result.
 function submitRequest(interaction, env, cfg, ctx, { category, item, qty }) {
   const label = CATEGORY_LABELS[category];
 
@@ -232,7 +307,7 @@ function submitRequest(interaction, env, cfg, ctx, { category, item, qty }) {
     if (tornId) {
       const c = await env.DB.prepare(`SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN status = 'fulfilled' THEN 1 ELSE 0 END), 0) AS fulfilled FROM requests WHERE torn_id = ?`).bind(tornId).first();
       totalReqs = c?.total || 0; fulfilledReqs = c?.fulfilled || 0;
-      history = (await env.DB.prepare(`SELECT r.id, r.qty, r.status, r.category, i.name AS item_name FROM requests r LEFT JOIN items i ON i.item_id = r.item_id WHERE r.torn_id = ? AND r.id != ? ORDER BY r.created_at DESC LIMIT 5`).bind(tornId, id).all()).results;
+      history = await db.recentRequestsFor(env.DB, tornId, id);
     }
     const who = tornId ? `${tornName} [${tornId}]` : tornName;
     const shown = item ? item.name : `${label} (any)`;
@@ -272,12 +347,12 @@ function submitRequest(interaction, env, cfg, ctx, { category, item, qty }) {
       components: bankerButtons(id, tornId),
     });
     await env.DB.prepare('UPDATE requests SET public_message_id = ?, banker_message_id = ? WHERE id = ?').bind(pub.id, bank.id, id).run();
-    await followup(env, interaction.token, { content: `Request #${id} submitted: ${qty} x ${shown}.` });
+    await followup(env, interaction.token, { content: `Request #${id} submitted: ${qty} x ${shown}.`, components: [] });
   })().catch(async (e) => {
     console.log('request failed', e.message);
-    await followup(env, interaction.token, { content: `Request failed: ${e.message}` });
+    await followup(env, interaction.token, { content: `Request failed: ${e.message}`, components: [] });
   }));
-  return json({ type: 5, data: { flags: EPHEMERAL } });
+  return json({ type: 7, data: { content: 'Creating your request…', components: [] } });
 }
 
 // Re-post an open request to the channels. Used by the site's "Resend" action when
@@ -295,7 +370,7 @@ export async function repostRequest(env, cfg, req) {
   if (req.torn_id) {
     const c = await env.DB.prepare(`SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN status = 'fulfilled' THEN 1 ELSE 0 END), 0) AS fulfilled FROM requests WHERE torn_id = ?`).bind(req.torn_id).first();
     totalReqs = c?.total || 0; fulfilledReqs = c?.fulfilled || 0;
-    history = (await env.DB.prepare(`SELECT r.id, r.qty, r.status, r.category, i.name AS item_name FROM requests r LEFT JOIN items i ON i.item_id = r.item_id WHERE r.torn_id = ? AND r.id != ? ORDER BY r.created_at DESC LIMIT 5`).bind(req.torn_id, req.id).all()).results;
+    history = await db.recentRequestsFor(env.DB, req.torn_id, req.id);
   }
 
   let profile = null;
@@ -343,7 +418,11 @@ export async function repostRequest(env, cfg, req) {
 
 async function cmdMyStats(interaction, env) {
   const discordId = interaction.member?.user?.id || interaction.user?.id;
-  const rows = (await env.DB.prepare(`SELECT r.id, r.qty, r.status, r.category, i.name AS item_name FROM requests r LEFT JOIN items i ON i.item_id = r.item_id WHERE r.discord_id = ? ORDER BY r.created_at DESC LIMIT 20`).bind(discordId).all()).results;
+  const rows = (await env.DB.prepare(`SELECT r.id, r.status, r.category, i.name AS item_name,
+    CASE WHEN r.status = 'fulfilled'
+      THEN COALESCE((SELECT SUM(t.qty) FROM transactions t WHERE t.request_id = r.id), r.qty)
+      ELSE r.qty END AS qty
+    FROM requests r LEFT JOIN items i ON i.item_id = r.item_id WHERE r.discord_id = ? ORDER BY r.created_at DESC LIMIT 20`).bind(discordId).all()).results;
   if (!rows.length) return reply('No requests.');
   return replyEmbed({ title: 'Your requests', color: COLORS.info, description: rows.map(r => `\`#${r.id}\` ${fmt(r.qty)} x ${reqLabel(r)} — **${r.status}**`).join('\n').slice(0, 4000) });
 }
@@ -449,8 +528,10 @@ async function cmdThreshold(interaction, env) {
 
 async function component(interaction, env, cfg, ctx) {
   const [action, idStr] = interaction.data.custom_id.split(':');
-  // Member request flow: item picker after the request form. Open to everyone.
-  if (action === 'req_item') return requestItemPicked(interaction, env, cfg, ctx);
+  // Member request flow: category -> item -> quantity dropdowns. Open to everyone.
+  if (action === 'req_cat') return requestCategory(interaction, env, cfg);
+  if (action === 'req_it') return requestItem(interaction, env, cfg);
+  if (action === 'req_qty') return requestQty(interaction, env, cfg, ctx);
   const id = Number(idStr);
   if (!hasRole(interaction, cfg.banker_role) && !hasRole(interaction, cfg.council_role)) return reply('Banker role required.');
   const req = await db.getRequest(env.DB, id);
@@ -507,17 +588,20 @@ function modalValue(components, customId) {
 
 async function modal(interaction, env, cfg, ctx) {
   const [action, idStr] = interaction.data.custom_id.split(':');
-  if (action === 'req_form') return requestForm(interaction, env, cfg, ctx);
   if (action !== 'decline_modal') return reply('Unknown modal.');
   const reason = modalValue(interaction.data.components, 'reason') || '';
   return cmdDecline(interaction, env, cfg, ctx, Number(idStr), reason, true);
 }
 
-async function cmdDecline(interaction, env, cfg, ctx, id, reason, fromModal = false) {
+// Mark a request declined and update its Discord messages: set the public message
+// to a declined status and rewrite the banker card as declined with its buttons
+// removed. Shared by the /decline command, the decline modal, and the council
+// website, so a decline from anywhere clears the card from the bankers channel.
+// Returns { error } if the request cannot be declined, else { req }.
+export async function declineRequest(env, cfg, ctx, id, reason, who) {
   const req = await db.getRequest(env.DB, id);
-  if (!req) return reply('Request not found.');
-  if (['fulfilled', 'declined'].includes(req.status)) return reply(`Request #${id} is already ${req.status}.`);
-  const who = displayName(interaction);
+  if (!req) return { error: 'Request not found.' };
+  if (['fulfilled', 'declined'].includes(req.status)) return { error: `Request #${id} is already ${req.status}.` };
   await env.DB.prepare(`UPDATE requests SET status = 'declined', decline_reason = ?, handled_by = ?, updated_at = ? WHERE id = ?`).bind(reason, who, db.now(), id).run();
   const suffix = reason ? ` Reason: ${reason}` : '';
   const declinedStatus = `Declined by ${who}.${suffix}`;
@@ -525,6 +609,12 @@ async function cmdDecline(interaction, env, cfg, ctx, id, reason, fromModal = fa
     if (req.public_message_id) await edit(env, cfg.requests_channel, req.public_message_id, { content: `<@${req.discord_id}>`, embeds: [requestStatusEmbed(id, req.qty, reqLabel(req), req.torn_name, declinedStatus, COLORS.declined)] });
     if (req.banker_message_id) await edit(env, cfg.bankers_channel, req.banker_message_id, { embeds: [requestStatusEmbed(id, req.qty, reqLabel(req), req.torn_name, declinedStatus, COLORS.declined)], components: [] });
   })());
+  return { req };
+}
+
+async function cmdDecline(interaction, env, cfg, ctx, id, reason, fromModal = false) {
+  const { error } = await declineRequest(env, cfg, ctx, id, reason, displayName(interaction));
+  if (error) return reply(error);
   if (fromModal) return json({ type: 4, data: { content: `Request #${id} declined.`, flags: EPHEMERAL } });
   return reply(`Request #${id} declined.`);
 }

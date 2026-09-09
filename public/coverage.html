@@ -1,0 +1,690 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Support Coverage</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:ital,wght@0,400;0,500;0,700;0,900;1,400&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --bg: #E6ECE9;
+      --paper: #FFFFFF;
+      --ink: #15211B;
+      --muted: #5E6E66;
+      --rule: #C9D3CE;
+      --accent: #1E7360;
+      --accent-ink: #FFFFFF;
+      --warn: #B2372E;
+      --soft: #F3F6F4;
+    }
+
+    :root[data-theme="dark"] {
+      --bg: #10150F;
+      --paper: #19201B;
+      --ink: #C4CEC8;
+      --muted: #7E8E85;
+      --rule: #2C3630;
+      --accent: #35A98C;
+      --accent-ink: #06120C;
+      --warn: #E27469;
+      --soft: #212A24;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+
+    html,
+    body {
+      margin: 0;
+    }
+
+    body {
+      font-family: 'Schibsted Grotesk', system-ui, sans-serif;
+      font-size: 15px;
+      line-height: 1.4;
+      color: var(--ink);
+      background: var(--bg);
+    }
+
+    a {
+      color: inherit;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+      color: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    header {
+      padding: 28px 40px 0;
+    }
+
+    .brand {
+      font-size: 34px;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+      line-height: 1;
+      margin: 0 0 18px;
+    }
+
+    nav {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      border-bottom: 1px solid var(--rule);
+      padding-bottom: 12px;
+    }
+
+    nav .spacer {
+      flex: 1;
+    }
+
+    nav button {
+      background: none;
+      border: 0;
+      color: var(--muted);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    nav button:hover {
+      color: var(--ink);
+    }
+
+    nav button.icon-btn svg {
+      width: 18px;
+      height: 18px;
+      display: block;
+    }
+
+    main {
+      padding: 32px 40px 80px;
+    }
+
+    h2 {
+      font-size: 22px;
+      font-weight: 700;
+      margin: 0 0 16px;
+      letter-spacing: -0.01em;
+    }
+
+    .page-desc {
+      color: var(--muted);
+      margin: -6px 0 28px;
+      max-width: 780px;
+    }
+
+    .section-desc {
+      color: var(--muted);
+      margin: -8px 0 18px;
+      max-width: 780px;
+    }
+
+    input,
+    select {
+      padding: 8px 10px;
+      border: 1px solid var(--rule);
+      border-radius: 4px;
+      background: var(--paper);
+    }
+
+    input:focus,
+    select:focus,
+    button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }
+
+    .primary {
+      background: var(--accent);
+      color: var(--accent-ink);
+      border: 1px solid var(--accent);
+      border-radius: 4px;
+      padding: 8px 14px;
+      font-weight: 500;
+      text-decoration: none;
+      display: inline-block;
+    }
+
+    button.quiet {
+      background: none;
+      border: 1px solid var(--rule);
+      border-radius: 4px;
+      padding: 6px 12px;
+    }
+
+    button.quiet.warn {
+      color: var(--warn);
+      border-color: var(--warn);
+    }
+
+    .card {
+      background: var(--paper);
+      border: 1px solid var(--rule);
+      border-radius: 8px;
+      padding: 18px 20px;
+    }
+
+    .msg {
+      color: var(--warn);
+      margin: 10px 0 0;
+      min-height: 1.4em;
+    }
+
+    .msg.ok {
+      color: var(--accent);
+    }
+
+    /* --- Coverage overview heatmap (read-only), same look as the dashboard heat. --- */
+    .scroll {
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .heat {
+      display: grid;
+      grid-template-columns: 34px repeat(24, minmax(0, 18px));
+      gap: 2px;
+      align-items: center;
+      justify-content: start;
+    }
+
+    .heat .hx {
+      font-size: 10px;
+      color: var(--muted);
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .heat .hy {
+      font-size: 11px;
+      color: var(--muted);
+      text-align: right;
+      padding-right: 6px;
+    }
+
+    .heat .cell {
+      aspect-ratio: 1 / 1;
+      border-radius: 2px;
+      background: var(--soft);
+    }
+
+    .legend {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 14px;
+      font-size: 12.5px;
+      color: var(--muted);
+    }
+
+    .legend .ramp {
+      display: inline-flex;
+      gap: 2px;
+    }
+
+    .legend .ramp i {
+      width: 14px;
+      height: 12px;
+      border-radius: 2px;
+    }
+
+    .empty {
+      color: var(--muted);
+      padding: 12px 0;
+    }
+
+    /* --- Roster --- */
+    .roster {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .rperson {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+      padding: 10px 12px;
+    }
+
+    .rperson b {
+      font-weight: 700;
+    }
+
+    .rperson .meta {
+      color: var(--muted);
+      font-size: 12.5px;
+    }
+
+    .rperson button {
+      background: none;
+      border: 0;
+      color: var(--muted);
+      text-decoration: underline;
+      padding: 0;
+      font-size: 13px;
+    }
+
+    /* --- Code gate --- */
+    #gate {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+    }
+
+    #gate form {
+      display: grid;
+      gap: 12px;
+      width: 280px;
+    }
+
+    #gate .brand {
+      margin-bottom: 8px;
+    }
+
+    /* --- Editor modal --- */
+    .backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, .45);
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      z-index: 50;
+    }
+
+    .modal {
+      background: var(--paper);
+      border: 1px solid var(--rule);
+      border-radius: 10px;
+      padding: 22px 24px;
+      width: 100%;
+      max-width: 760px;
+      max-height: 90vh;
+      overflow: auto;
+    }
+
+    .modal h2 {
+      margin-bottom: 6px;
+    }
+
+    .frow {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px 16px;
+      align-items: center;
+      margin: 16px 0;
+    }
+
+    .frow label {
+      color: var(--muted);
+      font-size: 13px;
+      display: grid;
+      gap: 4px;
+    }
+
+    /* --- Editable 7x24 grid --- */
+    .egrid {
+      display: grid;
+      grid-template-columns: 40px repeat(24, minmax(14px, 1fr)) auto;
+      gap: 2px;
+      align-items: center;
+      user-select: none;
+      min-width: 560px;
+    }
+
+    .egrid .hx {
+      font-size: 10px;
+      color: var(--muted);
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .egrid .ey {
+      font-size: 12px;
+      color: var(--muted);
+      text-align: right;
+      padding-right: 6px;
+    }
+
+    .egrid .ecell {
+      aspect-ratio: 1 / 1;
+      min-height: 16px;
+      border-radius: 2px;
+      background: var(--soft);
+      cursor: pointer;
+    }
+
+    .egrid .ecell.on {
+      background: var(--accent);
+    }
+
+    .egrid .eact {
+      display: inline-flex;
+      gap: 4px;
+      padding-left: 8px;
+      white-space: nowrap;
+    }
+
+    .egrid .eact button {
+      background: none;
+      border: 1px solid var(--rule);
+      border-radius: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      padding: 2px 6px;
+    }
+
+    .egrid .eact button:hover {
+      color: var(--ink);
+    }
+
+    .modal-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 20px;
+      flex-wrap: wrap;
+    }
+
+    .modal-actions .spacer {
+      flex: 1;
+    }
+
+    @media (max-width: 720px) {
+
+      header,
+      main {
+        padding-left: 16px;
+        padding-right: 16px;
+      }
+
+      .brand {
+        font-size: 26px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="gate" hidden>
+    <form id="gateForm">
+      <div class="brand">Support Coverage</div>
+      <input type="password" id="code" placeholder="Access code" autocomplete="off" autofocus>
+      <button class="primary" type="submit">Enter</button>
+      <div class="msg" id="gateMsg"></div>
+    </form>
+  </div>
+
+  <div id="app" hidden>
+    <header>
+      <div class="brand">Support Coverage</div>
+      <nav>
+        <button id="addBtn" class="primary" style="padding:6px 12px">Add / edit my availability</button>
+        <span class="spacer"></span>
+        <button id="themeToggle" class="icon-btn" title="Toggle dark mode" aria-label="Toggle dark mode"></button>
+      </nav>
+    </header>
+    <main>
+      <h2>Team coverage</h2>
+      <p class="page-desc">When the support team is usually around, in Torn City Time (TCT). Darker means more people
+        available that hour. Add your own hours with the button above.</p>
+      <div class="card">
+        <div id="overview" class="scroll"></div>
+        <div id="legend"></div>
+      </div>
+      <div id="roster" class="roster"></div>
+    </main>
+  </div>
+
+  <script>
+    const $ = (s, r = document) => r.querySelector(s);
+    const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const WEEKDAYS = [1, 2, 3, 4, 5];
+    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+    // Theme toggle, mirrors the dashboard.
+    const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path></svg>';
+    const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>';
+    const applyTheme = t => {
+      document.documentElement.dataset.theme = t;
+      const btn = document.getElementById('themeToggle');
+      if (btn) btn.innerHTML = t === 'dark' ? SUN : MOON;
+    };
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    applyTheme(localStorage.getItem('theme') || (prefersDark ? 'dark' : 'light'));
+    document.getElementById('themeToggle').addEventListener('click', () => {
+      const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('theme', next);
+      applyTheme(next);
+    });
+
+    async function api(path, opts = {}) {
+      const r = await fetch('/api' + path, { headers: { 'Content-Type': 'application/json' }, ...opts, body: opts.body ? JSON.stringify(opts.body) : undefined });
+      if (r.status === 401) { showGate(); throw new Error('unauthorised'); }
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || r.statusText);
+      return data;
+    }
+
+    // slots is a 168-char '0'/'1' string, day-major (day 0 = Sun), hour 0..23 in TCT.
+    const emptyGrid = () => Array.from({ length: 7 }, () => new Array(24).fill(false));
+    function slotsToGrid(s) {
+      const g = emptyGrid();
+      if (typeof s !== 'string' || s.length !== 168) return g;
+      for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) g[d][h] = s[d * 24 + h] === '1';
+      return g;
+    }
+    function gridToSlots(g) {
+      let out = '';
+      for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) out += g[d][h] ? '1' : '0';
+      return out;
+    }
+
+    let people = [];
+
+    function showGate() { $('#gate').hidden = false; $('#app').hidden = true; }
+    function showApp() { $('#gate').hidden = true; $('#app').hidden = false; load(); }
+
+    $('#gateForm').addEventListener('submit', async e => {
+      e.preventDefault();
+      const r = await fetch('/api/coverage/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: $('#code').value }) });
+      if (r.ok) { $('#code').value = ''; showApp(); }
+      else { $('#gateMsg').textContent = 'Wrong code'; $('#code').value = ''; }
+    });
+
+    async function load() {
+      try { people = await api('/coverage/data'); } catch { return; }
+      renderOverview();
+      renderRoster();
+    }
+
+    // --- Read-only team coverage heatmap: cell = number of people available. ---
+    function renderOverview() {
+      const counts = Array.from({ length: 7 }, () => new Array(24).fill(0));
+      const names = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => []));
+      for (const p of people) {
+        const g = slotsToGrid(p.slots);
+        for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) if (g[d][h]) { counts[d][h]++; names[d][h].push(p.name); }
+      }
+      const total = people.length;
+      if (!total) { $('#overview').innerHTML = `<p class="empty">No one has added their hours yet. Be the first with the button above.</p>`; $('#legend').innerHTML = ''; return; }
+      const max = Math.max(1, ...counts.flat());
+      const cell = (n, d, h) => {
+        const pct = n ? 18 + Math.round(n / max * 82) : 0;
+        const bg = n ? `background:color-mix(in srgb, var(--accent) ${pct}%, var(--soft))` : '';
+        const who = n ? ` — ${esc(names[d][h].join(', '))}` : '';
+        return `<div class="cell" style="${bg}" title="${DAYS[d]} ${String(h).padStart(2, '0')}:00 TCT — ${n} of ${total} available${who}"></div>`;
+      };
+      const hourAxis = ['<div></div>', ...Array.from({ length: 24 }, (_, h) => `<div class="hx">${h % 3 === 0 ? h : ''}</div>`)].join('');
+      const rows = counts.map((row, d) => `<div class="hy">${DAYS[d]}</div>${row.map((n, h) => cell(n, d, h)).join('')}`).join('');
+      $('#overview').innerHTML = `<div class="heat">${hourAxis}${rows}</div>`;
+      const swatches = [0.2, 0.45, 0.7, 1].map(f => `<i style="background:color-mix(in srgb, var(--accent) ${18 + Math.round(f * 82)}%, var(--soft))"></i>`).join('');
+      $('#legend').innerHTML = `<div class="legend"><span>Fewer</span><span class="ramp">${swatches}</span><span>More (up to ${max} of ${total})</span></div>`;
+    }
+
+    function renderRoster() {
+      if (!people.length) { $('#roster').innerHTML = ''; return; }
+      $('#roster').innerHTML = people.map(p => {
+        const hrs = (p.slots || '').split('').filter(c => c === '1').length;
+        const tz = p.timezone ? esc(p.timezone) : 'no timezone set';
+        return `<div class="rperson">
+          <div><b>${esc(p.name)}</b><div class="meta">${tz} · ${hrs} hr/wk</div></div>
+          <button data-id="${p.id}">Edit</button>
+        </div>`;
+      }).join('');
+      $('#roster').querySelectorAll('button[data-id]').forEach(b =>
+        b.addEventListener('click', () => openModal(people.find(p => p.id === Number(b.dataset.id)))));
+    }
+
+    // --- Editor modal ---
+    let editState = null; // { id, grid }
+
+    function openModal(person) {
+      editState = { id: person ? person.id : null, grid: person ? slotsToGrid(person.slots) : emptyGrid() };
+      const options = ['<option value="">— New person —</option>', ...people.map(p =>
+        `<option value="${p.id}"${person && person.id === p.id ? ' selected' : ''}>${esc(p.name)}</option>`)].join('');
+      const back = document.createElement('div');
+      back.className = 'backdrop';
+      back.innerHTML = `
+        <div class="modal" role="dialog" aria-modal="true">
+          <h2>Your availability</h2>
+          <p class="section-desc">Click or drag across the grid to mark the hours you're usually around, in TCT.</p>
+          <div class="frow">
+            <label>Who are you?
+              <select id="mWho">${options}</select>
+            </label>
+            <label>Your name
+              <input id="mName" placeholder="Display name" value="${person ? esc(person.name) : ''}" maxlength="60">
+            </label>
+            <label>Timezone (context only)
+              <input id="mTz" placeholder="e.g. US East, nights" value="${person ? esc(person.timezone) : ''}" maxlength="60">
+            </label>
+          </div>
+          <div class="scroll"><div class="egrid" id="mGrid"></div></div>
+          <div class="modal-actions">
+            <button class="quiet" id="mClearAll" type="button">Clear all</button>
+            <span class="spacer"></span>
+            ${person ? '<button class="quiet warn" id="mDelete" type="button">Delete</button>' : ''}
+            <button class="quiet" id="mCancel" type="button">Cancel</button>
+            <button class="primary" id="mSave" type="button">Save</button>
+          </div>
+          <div class="msg" id="mMsg"></div>
+        </div>`;
+      document.body.appendChild(back);
+
+      const close = () => back.remove();
+      back.addEventListener('mousedown', e => { if (e.target === back) close(); });
+      $('#mCancel', back).addEventListener('click', close);
+      $('#mWho', back).addEventListener('change', e => {
+        const id = e.target.value ? Number(e.target.value) : null;
+        const p = people.find(x => x.id === id);
+        editState = { id, grid: p ? slotsToGrid(p.slots) : emptyGrid() };
+        $('#mName', back).value = p ? p.name : '';
+        $('#mTz', back).value = p ? (p.timezone || '') : '';
+        // Rebuild modal so the Delete button reflects the new selection.
+        close();
+        openModal(p || null);
+      });
+      $('#mClearAll', back).addEventListener('click', () => { editState.grid = emptyGrid(); paintGrid(back); });
+      const del = $('#mDelete', back);
+      if (del) del.addEventListener('click', async () => {
+        if (!editState.id) return;
+        try { await api('/coverage/' + editState.id, { method: 'DELETE' }); } catch (err) { $('#mMsg', back).textContent = err.message; return; }
+        close(); await load();
+      });
+      $('#mSave', back).addEventListener('click', async () => {
+        const name = $('#mName', back).value.trim();
+        if (!name) { $('#mMsg', back).textContent = 'Enter your name'; return; }
+        const body = { id: editState.id, name, timezone: $('#mTz', back).value.trim(), slots: gridToSlots(editState.grid) };
+        try { await api('/coverage/save', { method: 'POST', body }); } catch (err) { $('#mMsg', back).textContent = err.message; return; }
+        close(); await load();
+      });
+
+      buildGrid(back);
+    }
+
+    // Build the editable grid markup and wire click/drag painting.
+    function buildGrid(back) {
+      const el = $('#mGrid', back);
+      const hourAxis = ['<div></div>', ...Array.from({ length: 24 }, (_, h) => `<div class="hx">${h % 3 === 0 ? h : ''}</div>`), '<div></div>'].join('');
+      const rows = DAYS.map((day, d) => {
+        const cells = Array.from({ length: 24 }, (_, h) => `<div class="ecell" data-d="${d}" data-h="${h}"></div>`).join('');
+        const act = `<div class="eact"><button type="button" data-copy="wk" data-d="${d}">→ weekdays</button><button type="button" data-copy="all" data-d="${d}">→ all</button><button type="button" data-clear="${d}">clr</button></div>`;
+        return `<div class="ey">${day}</div>${cells}${act}`;
+      }).join('');
+      el.innerHTML = hourAxis + rows;
+      paintGrid(back);
+
+      let painting = false, paintVal = true;
+      const apply = (target) => {
+        if (!target.classList.contains('ecell')) return;
+        const d = Number(target.dataset.d), h = Number(target.dataset.h);
+        editState.grid[d][h] = paintVal;
+        target.classList.toggle('on', paintVal);
+      };
+      el.addEventListener('mousedown', e => {
+        if (!e.target.classList.contains('ecell')) return;
+        e.preventDefault();
+        const d = Number(e.target.dataset.d), h = Number(e.target.dataset.h);
+        paintVal = !editState.grid[d][h];
+        painting = true;
+        apply(e.target);
+      });
+      el.addEventListener('mouseover', e => { if (painting) apply(e.target); });
+      // Scoped to the backdrop (full-viewport, removed on close) so listeners don't accumulate.
+      back.addEventListener('mouseup', () => { painting = false; });
+
+      // Per-row copy / clear helpers.
+      el.querySelectorAll('button[data-copy]').forEach(b => b.addEventListener('click', () => {
+        const d = Number(b.dataset.d);
+        const src = editState.grid[d].slice();
+        const targets = b.dataset.copy === 'wk' ? WEEKDAYS : [0, 1, 2, 3, 4, 5, 6];
+        for (const t of targets) editState.grid[t] = src.slice();
+        paintGrid(back);
+      }));
+      el.querySelectorAll('button[data-clear]').forEach(b => b.addEventListener('click', () => {
+        editState.grid[Number(b.dataset.clear)] = new Array(24).fill(false);
+        paintGrid(back);
+      }));
+    }
+
+    // Sync the grid cells' on/off classes to editState.grid.
+    function paintGrid(back) {
+      $('#mGrid', back).querySelectorAll('.ecell').forEach(c => {
+        c.classList.toggle('on', editState.grid[Number(c.dataset.d)][Number(c.dataset.h)]);
+      });
+    }
+
+    $('#addBtn').addEventListener('click', () => openModal(null));
+
+    // On load, probe whether the coverage cookie is already valid.
+    (async () => {
+      try { people = await api('/coverage/data'); showApp(); }
+      catch { showGate(); }
+    })();
+  </script>
+</body>
+
+</html>

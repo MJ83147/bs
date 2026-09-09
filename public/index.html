@@ -20,6 +20,8 @@
       --accent-ink: #FFFFFF;
       --warn: #B2372E;
       --soft: #F3F6F4;
+      --c-open: #C8871E;
+      --c-approved: #2F6DB0;
     }
 
     :root[data-theme="dark"] {
@@ -32,6 +34,8 @@
       --accent-ink: #06120C;
       --warn: #E27469;
       --soft: #212A24;
+      --c-open: #E0A94A;
+      --c-approved: #5B9BD8;
     }
 
     * {
@@ -341,6 +345,205 @@
       background: var(--warn);
     }
 
+    .dash-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);
+      gap: 24px;
+      align-items: start;
+    }
+
+    .chart-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      align-content: start;
+      min-width: 0;
+    }
+
+    .dash-grid > section > h2 {
+      margin-top: 0;
+    }
+
+    @media (max-width: 1080px) {
+      .dash-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 620px) {
+      .chart-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .chart {
+      background: var(--paper);
+      border: 1px solid var(--rule);
+      border-radius: 8px;
+      padding: 16px 20px 18px;
+    }
+
+    .chart h3 {
+      font-size: 15px;
+      font-weight: 700;
+      margin: 0 0 2px;
+    }
+
+    .chart .sub {
+      color: var(--muted);
+      font-size: 13px;
+      margin: 0 0 14px;
+    }
+
+    .chart svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 160px;
+      overflow: visible;
+    }
+
+    .chart .axis {
+      fill: var(--muted);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .chart .val {
+      fill: var(--ink);
+      font-size: 12px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .chart .lbl {
+      fill: var(--ink);
+      font-size: 12.5px;
+    }
+
+    .chart .empty {
+      color: var(--muted);
+      font-size: 13px;
+      padding: 12px 0;
+    }
+
+    .heat-cell {
+      stroke: var(--paper);
+      stroke-width: 2;
+      rx: 2;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 16px;
+      margin-top: 12px;
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12.5px;
+      color: var(--muted);
+    }
+
+    .legend i {
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+      flex: 0 0 auto;
+    }
+
+    .legend b {
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .hbars {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .hbar-row {
+      display: grid;
+      grid-template-columns: 120px 1fr auto;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .hbar-row .lbl {
+      font-size: 13px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .hbar-row .track {
+      height: 10px;
+      background: var(--soft);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .hbar-row .track > span {
+      display: block;
+      height: 100%;
+      background: var(--accent);
+      border-radius: 999px;
+    }
+
+    .hbar-row .n {
+      font-size: 13px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      min-width: 28px;
+      text-align: right;
+    }
+
+    .sbar {
+      display: flex;
+      height: 14px;
+      border-radius: 999px;
+      overflow: hidden;
+      gap: 2px;
+      background: var(--soft);
+    }
+
+    .sbar > span {
+      display: block;
+      min-width: 3px;
+    }
+
+    .heat {
+      display: grid;
+      grid-template-columns: 30px repeat(24, minmax(0, 16px));
+      gap: 2px;
+      align-items: center;
+      justify-content: start;
+    }
+
+    .heat .hx {
+      font-size: 10px;
+      color: var(--muted);
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .heat .hy {
+      font-size: 11px;
+      color: var(--muted);
+      text-align: right;
+      padding-right: 6px;
+    }
+
+    .heat .cell {
+      aspect-ratio: 1 / 1;
+      border-radius: 2px;
+      background: var(--soft);
+    }
+
     .table-wrap {
       max-height: 72vh;
       overflow: auto;
@@ -561,6 +764,10 @@
         gap: 24px;
       }
 
+      .dash-grid {
+        grid-template-columns: 1fr;
+      }
+
       th,
       td {
         padding: 8px;
@@ -597,6 +804,7 @@
         <a href="#requests" data-page="requests">Requests</a>
         <a href="#funds" data-page="funds">Register</a>
         <a href="#totals" data-page="totals">Totals</a>
+        <a href="#team" data-page="team">Team status</a>
         <a href="#search" data-page="search">Search</a>
         <a href="#risk" data-page="risk">Risk</a>
         <a href="#settings" data-page="settings">Settings</a>
@@ -653,7 +861,11 @@
 
     const pages = {};
     function route() {
-      const page = (location.hash || '#dashboard').slice(1);
+      // Hash routing drives the SPA; the bare /team path is a shareable entry
+      // point that opens the same page.
+      let page = (location.hash || '').slice(1);
+      if (!page && location.pathname === '/team') page = 'team';
+      page = page || 'dashboard';
       document.querySelectorAll('nav a').forEach(a => a.classList.toggle('active', a.dataset.page === page));
       (pages[page] || pages.dashboard)();
     }
@@ -669,27 +881,109 @@
       return `<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody>${foot ? `<tfoot>${foot}</tfoot>` : ''}</table></div>`;
     }
 
+    // --- Dashboard charts. Crisp HTML/CSS for bars, heatmap and the status bar;
+    // SVG only for the time series. Empty states are handled by each builder. ---
+    function chartCard(title, sub, body) {
+      return `<div class="chart"><h3>${esc(title)}</h3><p class="sub">${esc(sub)}</p>${body}</div>`;
+    }
+
+    // Horizontal bars, biggest first. data: [{ label, n }].
+    function hbars(data) {
+      if (!data.length) return `<p class="empty">No requests yet.</p>`;
+      const max = Math.max(...data.map(d => d.n)) || 1;
+      return `<div class="hbars">${data.map(d => `
+        <div class="hbar-row" title="${esc(d.label)}: ${fmt(d.n)}">
+          <span class="lbl">${esc(d.label)}</span>
+          <span class="track"><span style="width:${Math.max(2, Math.round(d.n / max * 100))}%"></span></span>
+          <span class="n">${fmt(d.n)}</span>
+        </div>`).join('')}</div>`;
+    }
+
+    // 7x24 request-count grid, coloured by a single-hue sequential ramp (accent into soft).
+    function heat(grid) {
+      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const max = Math.max(1, ...grid.flat());
+      const total = grid.flat().reduce((s, n) => s + n, 0);
+      if (!total) return `<p class="empty">No requests yet.</p>`;
+      const cell = (n, day, hour) => {
+        const pct = n ? 18 + Math.round(n / max * 82) : 0;
+        const bg = n ? `background:color-mix(in srgb, var(--accent) ${pct}%, var(--soft))` : '';
+        return `<div class="cell" style="${bg}" title="${day} ${String(hour).padStart(2, '0')}:00 TCT — ${fmt(n)} request${n === 1 ? '' : 's'}"></div>`;
+      };
+      const hourAxis = ['<div></div>', ...Array.from({ length: 24 }, (_, h) => `<div class="hx">${h % 6 === 0 ? h : ''}</div>`)].join('');
+      const rows = grid.map((row, dow) => `<div class="hy">${days[dow]}</div>${row.map((n, h) => cell(n, days[dow], h)).join('')}`).join('');
+      return `<div class="heat">${hourAxis}${rows}</div>`;
+    }
+
+    // Request volume over time as an SVG area+line. points: [{ day, n }].
+    function timeSeries(points) {
+      const total = points.reduce((s, p) => s + p.n, 0);
+      if (!total) return `<p class="empty">No requests in this window.</p>`;
+      const W = 700, H = 170, padL = 28, padR = 8, padT = 12, padB = 22;
+      const max = Math.max(1, ...points.map(p => p.n));
+      const n = points.length;
+      const x = i => padL + (n <= 1 ? 0 : i / (n - 1) * (W - padL - padR));
+      const y = v => padT + (1 - v / max) * (H - padT - padB);
+      const line = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.n).toFixed(1)}`).join(' ');
+      const area = `${line} L${x(n - 1).toFixed(1)} ${(H - padB).toFixed(1)} L${x(0).toFixed(1)} ${(H - padB).toFixed(1)} Z`;
+      const ticks = [0, Math.round(max / 2), max].filter((v, i, a) => a.indexOf(v) === i);
+      const gy = ticks.map(v => `<line x1="${padL}" y1="${y(v).toFixed(1)}" x2="${W - padR}" y2="${y(v).toFixed(1)}" stroke="var(--rule)" stroke-width="1"/><text class="axis" x="${padL - 6}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end">${v}</text>`).join('');
+      const mo = d => new Date(d * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+      const xlabels = [0, Math.floor((n - 1) / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i).map(i => `<text class="axis" x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}">${mo(points[i].day)}</text>`).join('');
+      const dots = points.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.n).toFixed(1)}" r="6" fill="transparent"><title>${mo(p.day)} — ${fmt(p.n)} request${p.n === 1 ? '' : 's'}</title></circle>`).join('');
+      return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Requests per day">
+        ${gy}
+        <path d="${area}" fill="color-mix(in srgb, var(--accent) 14%, transparent)"/>
+        <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+        ${xlabels}${dots}
+      </svg>`;
+    }
+
+    // Status breakdown as a single stacked bar with a labelled legend.
+    const STATUS_META = [
+      { key: 'fulfilled', label: 'Fulfilled', color: 'var(--accent)' },
+      { key: 'approved', label: 'Pending send', color: 'var(--c-approved)' },
+      { key: 'open', label: 'Open', color: 'var(--c-open)' },
+      { key: 'declined', label: 'Declined', color: 'var(--warn)' },
+      { key: 'cancelled', label: 'Cancelled', color: 'var(--muted)' },
+    ];
+    function statusBar(status) {
+      const items = STATUS_META.map(m => ({ ...m, n: status[m.key] || 0 }));
+      const total = items.reduce((s, it) => s + it.n, 0);
+      if (!total) return `<p class="empty">No requests yet.</p>`;
+      const segs = items.filter(it => it.n).map(it => `<span style="flex:${it.n};background:${it.color}" title="${it.label}: ${fmt(it.n)}"></span>`).join('');
+      const legend = items.map(it => `<span><i style="background:${it.color}"></i>${it.label} <b>${fmt(it.n)}</b></span>`).join('');
+      return `<div class="sbar">${segs}</div><div class="legend">${legend}</div>`;
+    }
+
     pages.dashboard = async () => {
-      const d = await api('/dashboard');
+      const [d, ins] = await Promise.all([api('/dashboard'), api('/insights?days=30')]);
       const value = d.stock.reduce((s, r) => s + r.qty * r.market_value, 0);
       $('#main').innerHTML = `
-    ${head('Dashboard', 'A live snapshot of the treasury: cash on hand, the market value of items in stock, and how many requests are waiting to be approved or sent.')}
+    ${head('Dashboard', 'A live snapshot of the treasury: cash on hand, the market value of items in stock, and how many requests are waiting to be approved or sent. The charts summarise member requests so you can see what to stock and when demand peaks.')}
     <div class="stats">
       <div class="stat"><b>${money(d.funds.balance)}</b><span>Funds</span></div>
       <div class="stat"><b>${money(value)}</b><span>Stock value</span></div>
       <div class="stat"><b>${fmt(d.open)}</b><span>Open requests</span></div>
       <div class="stat"><b>${fmt(d.approved)}</b><span>Pending send</span></div>
     </div>
-    <section>
-      <h2>Stock</h2>
-      <p class="section-desc">Current quantity of each item held, valued at Torn market price. Negative quantities mean more has been sent out than recorded coming in.</p>
-      ${table([
-        { h: 'Item', f: r => esc(r.name) },
-        { h: 'Qty', n: 1, f: r => r.qty < 0 ? `<span class="warn">${fmt(r.qty)}</span>` : fmt(r.qty) },
-        { h: 'Each', n: 1, f: r => money(r.market_value) },
-        { h: 'Value', n: 1, f: r => money(r.qty * r.market_value) },
-      ], d.stock)}
-    </section>`;
+    <div class="dash-grid">
+      <div class="chart-grid">
+        ${chartCard('Most requested', 'Requests by category, all time. Keep the busiest categories stocked.', hbars(ins.most_requested))}
+        ${chartCard('Request outcomes', 'How every request has ended up.', statusBar(ins.status))}
+        ${chartCard('Busiest time', 'When members request, by day and hour (Torn City Time). Darker means more requests.', heat(ins.heatmap))}
+        ${chartCard('Request volume', 'Requests per day over the last 30 days.', timeSeries(ins.volume))}
+      </div>
+      <section>
+        <h2>Stock</h2>
+        <p class="section-desc">Current quantity of each item held, valued at Torn market price. Negative quantities mean more has been sent out than recorded coming in.</p>
+        ${table([
+          { h: 'Item', f: r => esc(r.name) },
+          { h: 'Qty', n: 1, f: r => r.qty < 0 ? `<span class="warn">${fmt(r.qty)}</span>` : fmt(r.qty) },
+          { h: 'Value', n: 1, f: r => money(r.qty * r.market_value) },
+        ], d.stock)}
+      </section>
+    </div>`;
     };
 
     pages.bankers = async () => {
@@ -1005,6 +1299,64 @@
         { h: 'Value', n: 1, f: r => money(r.value) },
       ], t.members)}
     </section>`;
+    };
+
+    pages.team = async () => {
+      const { rows, fetched_at } = await api('/team-status');
+      const SDOT = { green: 'var(--accent)', blue: 'var(--c-approved)', red: 'var(--warn)' };
+      // Column set. `sort` is the key used when the header is clicked; `num` right-aligns.
+      const cols = [
+        { h: 'Member', sort: r => (r.name || '').toLowerCase(), f: r => `<a href="https://www.torn.com/profiles.php?XID=${r.id}" target="_blank" rel="noopener">${esc(r.name)}</a> <span style="color:var(--muted)">[${r.id}]</span>` },
+        { h: 'Attacks', num: 1, sort: r => r.attacks || 0, f: r => fmt(r.attacks || 0) },
+        { h: 'Score', num: 1, sort: r => r.score || 0, f: r => fmt(r.score || 0) },
+        { h: 'Level', num: 1, sort: r => r.level, f: r => fmt(r.level) },
+        { h: 'Faction', sort: r => (r.faction || '').toLowerCase(), f: r => esc(r.faction) },
+        { h: 'Status', sort: r => (r.status || '').toLowerCase(), f: r => `<span class="dot" style="background:${SDOT[r.color] || 'var(--muted)'}"></span>${esc(r.status)}` },
+        { h: 'Last action', sort: r => -(r.act_ts || 0), f: r => `${esc(r.act)}<span style="color:var(--muted)"> · ${esc(r.rel)}</span>` },
+        { h: 'Net worth', num: 1, sort: r => r.networth, f: r => money(r.networth) },
+      ];
+      // Default to most attacks first, the score that matters for the elimination.
+      const state = { q: '', status: '', act: '', si: 1, dir: -1 };
+      const statuses = [...new Set(rows.map(r => r.status))].sort();
+
+      const render = () => {
+        const q = state.q.toLowerCase();
+        let out = rows.filter(r =>
+          (!state.status || r.status === state.status) &&
+          (!state.act || r.act === state.act) &&
+          (!q || r.name.toLowerCase().includes(q) || String(r.id).includes(q) || (r.faction || '').toLowerCase().includes(q)));
+        const col = cols[state.si];
+        out = out.map(r => [col.sort(r), r]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0) * state.dir).map(p => p[1]);
+        const th = cols.map((c, i) => `<th class="${c.num ? 'n' : ''}" data-si="${i}" style="cursor:pointer">${c.h}${i === state.si ? (state.dir > 0 ? ' ▲' : ' ▼') : ''}</th>`).join('');
+        const body = out.map(r => `<tr>${cols.map(c => `<td class="${c.num ? 'n' : ''}">${c.f(r)}</td>`).join('')}</tr>`).join('');
+        $('#teamCount').textContent = `Showing ${fmt(out.length)} of ${fmt(rows.length)}`;
+        $('#teamTable').innerHTML = `<div class="table-wrap"><table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table></div>`;
+        $('#teamTable').querySelectorAll('th[data-si]').forEach(h => h.addEventListener('click', () => {
+          const i = Number(h.dataset.si);
+          if (i === state.si) state.dir = -state.dir; else { state.si = i; state.dir = 1; }
+          render();
+        }));
+      };
+
+      $('#main').innerHTML = `
+    ${head('Team status', `Every player on the Brain Surgeons elimination team with their competition attacks and score, plus level, faction, current Torn status, last action, and net worth. Sorted by attacks by default; click any column to re-sort, or search by name, ID, or faction.${fetched_at ? ` Snapshot from ${when(fetched_at)} TCT.` : ''}`)}
+    <div class="stats">
+      <div class="stat"><b>${fmt(rows.length)}</b><span>Members</span></div>
+      <div class="stat"><b>${fmt(rows.filter(r => r.act === 'Online').length)}</b><span>Online</span></div>
+      <div class="stat"><b>${fmt(rows.filter(r => r.status === 'Hospital').length)}</b><span>In hospital</span></div>
+      <div class="stat"><b>${fmt(rows.filter(r => r.status === 'Traveling' || r.status === 'Abroad').length)}</b><span>Traveling / abroad</span></div>
+    </div>
+    <div class="toolbar">
+      <input id="tsQ" placeholder="Name, ID, or faction" style="width:240px" autocomplete="off">
+      <select id="tsStatus"><option value="">All statuses</option>${statuses.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join('')}</select>
+      <select id="tsAct"><option value="">All activity</option><option value="Online">Online</option><option value="Idle">Idle</option><option value="Offline">Offline</option></select>
+      <span id="teamCount" style="color:var(--muted);align-self:center"></span>
+    </div>
+    <div id="teamTable"></div>`;
+      $('#tsQ').addEventListener('input', e => { state.q = e.target.value.trim(); render(); });
+      $('#tsStatus').addEventListener('change', e => { state.status = e.target.value; render(); });
+      $('#tsAct').addEventListener('change', e => { state.act = e.target.value; render(); });
+      render();
     };
 
     pages.settings = async () => {

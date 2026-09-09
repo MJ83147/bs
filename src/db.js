@@ -1,4 +1,4 @@
-import { ITEM_CATEGORIES, CATEGORY_LABELS, CATEGORY_MODE, CATEGORY_KEYS } from './categories.js';
+import { ITEM_CATEGORIES, CATEGORY_LABELS, CATEGORY_MODE, CATEGORY_KEYS, categoryOfItem } from './categories.js';
 
 // qty at/above = high, below = low (category page). Single editable threshold.
 export const LOW_STOCK = 50;
@@ -210,6 +210,27 @@ export function now() {
   return Math.floor(Date.now() / 1000);
 }
 
+// Support-team availability. Each row is one person's weekly pattern in TCT:
+// `slots` is a 168-char '0'/'1' string, day-major (day 0 = Sun), hour 0..23.
+export async function getAvailability(db) {
+  return (await db.prepare('SELECT id, name, timezone, slots, updated_at FROM availability ORDER BY name COLLATE NOCASE').all()).results;
+}
+
+export async function saveAvailability(db, { id, name, timezone, slots }) {
+  if (id) {
+    await db.prepare('UPDATE availability SET name = ?, timezone = ?, slots = ?, updated_at = ? WHERE id = ?')
+      .bind(name, timezone, slots, now(), id).run();
+    return id;
+  }
+  const r = await db.prepare('INSERT INTO availability (name, timezone, slots, updated_at) VALUES (?, ?, ?, ?)')
+    .bind(name, timezone, slots, now()).run();
+  return r.meta.last_row_id;
+}
+
+export async function deleteAvailability(db, id) {
+  await db.prepare('DELETE FROM availability WHERE id = ?').bind(id).run();
+}
+
 export async function playerHistory(db, tornId) {
   const tx = (await db.prepare(`
     SELECT t.*, i.name AS item_name, b.name AS banker_name FROM transactions t
@@ -220,6 +241,20 @@ export async function playerHistory(db, tornId) {
     LEFT JOIN items i ON i.item_id = r.item_id LEFT JOIN bankers b ON b.torn_id = r.banker_id
     WHERE r.torn_id = ? ORDER BY r.created_at DESC LIMIT 100`).bind(tornId).all()).results;
   return { tx, requests };
+}
+
+// Recent requests for the banker card. For fulfilled requests, qty is the amount
+// actually sent (from the linked transaction), not the amount the member asked
+// for, since a banker may send a different quantity. Falls back to the requested
+// qty when there is no linked send (e.g. a request fulfilled without a match).
+export async function recentRequestsFor(db, tornId, excludeId, limit = 5) {
+  return (await db.prepare(`
+    SELECT r.id, r.status, r.category, i.name AS item_name,
+      CASE WHEN r.status = 'fulfilled'
+        THEN COALESCE((SELECT SUM(t.qty) FROM transactions t WHERE t.request_id = r.id), r.qty)
+        ELSE r.qty END AS qty
+    FROM requests r LEFT JOIN items i ON i.item_id = r.item_id
+    WHERE r.torn_id = ? AND r.id != ? ORDER BY r.created_at DESC LIMIT ?`).bind(tornId, excludeId, limit).all()).results;
 }
 
 export async function itemHistory(db, itemId) {
@@ -234,6 +269,53 @@ export async function itemHistory(db, itemId) {
     SELECT r.*, b.name AS banker_name FROM requests r LEFT JOIN bankers b ON b.torn_id = r.banker_id
     WHERE r.item_id = ? ORDER BY r.created_at DESC LIMIT 100`).bind(itemId).all()).results;
   return { tx, purchases, requests };
+}
+
+// Aggregations for the dashboard charts. All grouped in one place so the /insights
+// endpoint is a single call. Times are bucketed in UTC, which is Torn City Time.
+export async function insights(db, { days = 30 } = {}) {
+  const since = now() - days * 86400;
+
+  // Status breakdown across all requests.
+  const statusRows = (await db.prepare(
+    `SELECT status, COUNT(*) AS n FROM requests GROUP BY status`).all()).results;
+  const status = {};
+  for (const r of statusRows) status[r.status] = r.n;
+
+  // Most requested, resolved to category. Old rows may lack `category` but have an
+  // item_id, so fold those into their category here rather than dropping them.
+  const catRows = (await db.prepare(
+    `SELECT category, item_id, COUNT(*) AS n FROM requests GROUP BY category, item_id`).all()).results;
+  const catCounts = {};
+  for (const r of catRows) {
+    const key = r.category || categoryOfItem(r.item_id);
+    if (!key) continue;
+    catCounts[key] = (catCounts[key] || 0) + r.n;
+  }
+  const most_requested = Object.entries(catCounts)
+    .map(([category, n]) => ({ category, label: CATEGORY_LABELS[category] || category, n }))
+    .sort((a, b) => b.n - a.n);
+
+  // Busiest time: request count per weekday (0=Sun..6=Sat) x hour (0-23), UTC.
+  const heatRows = (await db.prepare(
+    `SELECT CAST(strftime('%w', created_at, 'unixepoch') AS INTEGER) AS dow,
+            CAST(strftime('%H', created_at, 'unixepoch') AS INTEGER) AS hour,
+            COUNT(*) AS n
+     FROM requests GROUP BY dow, hour`).all()).results;
+  const heatmap = Array.from({ length: 7 }, () => new Array(24).fill(0));
+  for (const r of heatRows) if (r.dow != null && r.hour != null) heatmap[r.dow][r.hour] = r.n;
+
+  // Request volume per day over the window, gaps filled with zero.
+  const volRows = (await db.prepare(
+    `SELECT CAST(strftime('%s', date(created_at, 'unixepoch')) AS INTEGER) AS day, COUNT(*) AS n
+     FROM requests WHERE created_at >= ? GROUP BY day ORDER BY day`).bind(since).all()).results;
+  const byDay = new Map(volRows.map(r => [r.day, r.n]));
+  const startDay = Math.floor(since / 86400) * 86400;
+  const todayDay = Math.floor(now() / 86400) * 86400;
+  const volume = [];
+  for (let d = startDay; d <= todayDay; d += 86400) volume.push({ day: d, n: byDay.get(d) || 0 });
+
+  return { status, most_requested, heatmap, volume, days };
 }
 
 export async function requesterSummary(db) {

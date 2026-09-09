@@ -1,7 +1,7 @@
 import { hmac, encrypt, decrypt } from './crypto.js';
 import * as db from './db.js';
 import * as torn from './torn.js';
-import { post, repostRequest } from './discord.js';
+import { post, repostRequest, declineRequest } from './discord.js';
 
 const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json' } });
 const fmt = (n) => Number(n || 0).toLocaleString('en-GB');
@@ -21,6 +21,23 @@ export async function isAuthed(request, env) {
   return sig === await hmac(env.SESSION_SECRET, exp);
 }
 
+// The coverage page uses its own shared code and cookie, separate from the banker
+// site login. The cookie is HMAC-signed like bs_session but namespaced so the two
+// gates never overlap.
+async function makeCoverageSession(env) {
+  const exp = db.now() + 30 * 86400;
+  return `${exp}.${await hmac(env.SESSION_SECRET, 'coverage:' + exp)}`;
+}
+
+async function coverageAuthed(request, env) {
+  const cookie = request.headers.get('Cookie') || '';
+  const m = cookie.match(/(?:^|;\s*)bs_coverage=([^;]+)/);
+  if (!m) return false;
+  const [exp, sig] = m[1].split('.');
+  if (!exp || !sig || Number(exp) < db.now()) return false;
+  return sig === await hmac(env.SESSION_SECRET, 'coverage:' + exp);
+}
+
 export async function handleApi(request, env, ctx) {
   const url = new URL(request.url);
   const path = url.pathname.replace(/^\/api/, '');
@@ -38,6 +55,38 @@ export async function handleApi(request, env, ctx) {
   if (path === '/logout') {
     return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json', 'Set-Cookie': 'bs_session=; Path=/; Max-Age=0' } });
   }
+
+  // --- Support-team coverage page. Public URL, gated by its own shared code
+  // (COVERAGE_CODE), NOT the banker site login. Handled before the isAuthed gate.
+  if (path === '/coverage/login' && method === 'POST') {
+    const { code } = await request.json().catch(() => ({}));
+    if (!env.COVERAGE_CODE || code !== env.COVERAGE_CODE) return json({ ok: false }, 401);
+    const token = await makeCoverageSession(env);
+    return new Response(JSON.stringify({ ok: true }), { headers: {
+      'Content-Type': 'application/json',
+      'Set-Cookie': `bs_coverage=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${30 * 86400}`,
+    } });
+  }
+  if (path.startsWith('/coverage/')) {
+    if (!(await coverageAuthed(request, env))) return json({ error: 'unauthorised' }, 401);
+    if (path === '/coverage/data' && method === 'GET') {
+      return json(await db.getAvailability(env.DB));
+    }
+    if (path === '/coverage/save' && method === 'POST') {
+      const { id, name, timezone = '', slots } = await request.json().catch(() => ({}));
+      if (!name || !String(name).trim()) return json({ error: 'name required' }, 400);
+      if (typeof slots !== 'string' || !/^[01]{168}$/.test(slots)) return json({ error: 'slots must be 168 chars of 0/1' }, 400);
+      const savedId = await db.saveAvailability(env.DB, { id: id ? Number(id) : null, name: String(name).trim().slice(0, 60), timezone: String(timezone).slice(0, 60), slots });
+      return json({ ok: true, id: savedId });
+    }
+    const covDel = path.match(/^\/coverage\/(\d+)$/);
+    if (covDel && method === 'DELETE') {
+      await db.deleteAvailability(env.DB, Number(covDel[1]));
+      return json({ ok: true });
+    }
+    return json({ error: 'not found' }, 404);
+  }
+
   if (!(await isAuthed(request, env))) return json({ error: 'unauthorised' }, 401);
 
   const cfg = await db.getConfig(env.DB);
@@ -76,19 +125,47 @@ export async function handleApi(request, env, ctx) {
   if (reqAction && method === 'POST') {
     const id = Number(reqAction[1]);
     const { reason = '' } = await request.json().catch(() => ({}));
-    const req = await db.getRequest(env.DB, id);
-    if (!req) return json({ error: 'not found' }, 404);
-    if (['fulfilled', 'declined'].includes(req.status)) return json({ error: `already ${req.status}` }, 400);
-    await env.DB.prepare(`UPDATE requests SET status = 'declined', decline_reason = ?, handled_by = ?, updated_at = ? WHERE id = ?`).bind(reason, 'Council site', db.now(), id).run();
-    ctx.waitUntil((async () => {
-      const suffix = reason ? ` Reason: ${reason}` : '';
-      if (cfg.requests_channel) await post(env, cfg.requests_channel, `<@${req.discord_id}> request #${id} declined via council site.${suffix}`);
-    })());
+    const { error } = await declineRequest(env, cfg, ctx, id, reason, 'Council site');
+    if (error) return json({ error }, 400);
     return json({ ok: true });
+  }
+  if (path === '/insights') {
+    const days = url.searchParams.get('days') ? Number(url.searchParams.get('days')) : 30;
+    return json(await db.insights(env.DB, { days }));
   }
   if (path === '/funds') return json(await db.funds(env.DB));
   if (path === '/totals') {
     return json({ donors: await db.donorTotals(env.DB), members: await db.memberTotals(env.DB) });
+  }
+  if (path === '/team-status') {
+    // The roster snapshot is shipped as a static asset but kept behind this login
+    // gate: we read it through the ASSETS binding here rather than serving it
+    // publicly, and slim each row to only the fields the table needs.
+    const res = await env.ASSETS.fetch(new URL('/team-status.jsonl', request.url).toString());
+    if (!res.ok) return json({ error: 'roster unavailable' }, 404);
+    const text = await res.text();
+    const rows = [];
+    let fetched_at = 0;
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      let d; try { d = JSON.parse(line); } catch { continue; }
+      const i9 = d.icon9 || '';
+      let faction = '';
+      if (i9.startsWith('Faction - ')) {
+        const rest = i9.slice('Faction - '.length);
+        const i = rest.indexOf(' of ');
+        faction = i >= 0 ? rest.slice(i + 4) : rest;
+      }
+      if (d.fetched_at > fetched_at) fetched_at = d.fetched_at;
+      rows.push({
+        id: d.player_id, name: d.name, level: d.level, faction,
+        attacks: d.competition_attacks, score: d.competition_score,
+        status: d.status_state, color: d.status_color,
+        act: d.last_action_status, rel: d.last_action_relative,
+        act_ts: d.last_action_timestamp, networth: d.networth,
+      });
+    }
+    return json({ rows, fetched_at });
   }
 
   if (path === '/bankers' && method === 'GET') {

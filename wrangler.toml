@@ -9,6 +9,10 @@ routes = [
 [assets]
 directory = "./public"
 binding = "ASSETS"
+# Run the Worker before serving this path so the roster snapshot stays behind the
+# login gate; it is exposed only through the authed /api/team-status endpoint,
+# which still reads the file via the ASSETS binding.
+run_worker_first = ["/team-status.jsonl"]
 
 [triggers]
 crons = ["* * * * *"]
@@ -21,4 +25,4 @@ database_id = "18e53848-8bb6-4ba2-a413-b3471d67a900"
 [vars]
 DISCORD_APP_ID = "1343283117313757246"
 DISCORD_PUBLIC_KEY = "90a26981c9da0cf7683a6123b3f5da8214283e8fe452d6f05cb4ea14eba004e5"
-DISCORD_GUILD_ID = "1343284075540254730"
+DISCORD_GUILD_ID = "1545767742802501653"
