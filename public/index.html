@@ -81,6 +81,8 @@
 
     header {
       padding: 28px 40px 0;
+      max-width: 1440px;
+      margin: 0 auto;
     }
 
     .brand {
@@ -141,6 +143,8 @@
 
     main {
       padding: 32px 40px 80px;
+      max-width: 1440px;
+      margin: 0 auto;
     }
 
     h2 {
@@ -345,32 +349,15 @@
       background: var(--warn);
     }
 
-    .dash-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);
-      gap: 24px;
-      align-items: start;
-    }
-
     .chart-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 16px;
       align-content: start;
-      min-width: 0;
+      margin-bottom: 34px;
     }
 
-    .dash-grid > section > h2 {
-      margin-top: 0;
-    }
-
-    @media (max-width: 1080px) {
-      .dash-grid {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    @media (max-width: 620px) {
+    @media (max-width: 720px) {
       .chart-grid {
         grid-template-columns: 1fr;
       }
@@ -518,10 +505,9 @@
 
     .heat {
       display: grid;
-      grid-template-columns: 30px repeat(24, minmax(0, 16px));
+      grid-template-columns: 30px repeat(24, minmax(0, 1fr));
       gap: 2px;
       align-items: center;
-      justify-content: start;
     }
 
     .heat .hx {
@@ -967,23 +953,22 @@
       <div class="stat"><b>${fmt(d.open)}</b><span>Open requests</span></div>
       <div class="stat"><b>${fmt(d.approved)}</b><span>Pending send</span></div>
     </div>
-    <div class="dash-grid">
-      <div class="chart-grid">
-        ${chartCard('Most requested', 'Requests by category, all time. Keep the busiest categories stocked.', hbars(ins.most_requested))}
-        ${chartCard('Request outcomes', 'How every request has ended up.', statusBar(ins.status))}
-        ${chartCard('Busiest time', 'When members request, by day and hour (Torn City Time). Darker means more requests.', heat(ins.heatmap))}
-        ${chartCard('Request volume', 'Requests per day over the last 30 days.', timeSeries(ins.volume))}
-      </div>
-      <section>
-        <h2>Stock</h2>
-        <p class="section-desc">Current quantity of each item held, valued at Torn market price. Negative quantities mean more has been sent out than recorded coming in.</p>
-        ${table([
-          { h: 'Item', f: r => esc(r.name) },
-          { h: 'Qty', n: 1, f: r => r.qty < 0 ? `<span class="warn">${fmt(r.qty)}</span>` : fmt(r.qty) },
-          { h: 'Value', n: 1, f: r => money(r.qty * r.market_value) },
-        ], d.stock)}
-      </section>
-    </div>`;
+    <div class="chart-grid">
+      ${chartCard('Most requested', 'Requests by category, all time. Keep the busiest categories stocked.', hbars(ins.most_requested))}
+      ${chartCard('Request outcomes', 'How every request has ended up.', statusBar(ins.status))}
+      ${chartCard('Busiest time', 'When members request, by day and hour (Torn City Time). Darker means more requests.', heat(ins.heatmap))}
+      ${chartCard('Request volume', 'Requests per day over the last 30 days.', timeSeries(ins.volume))}
+    </div>
+    <section>
+      <h2>Stock</h2>
+      <p class="section-desc">Current quantity of each item held, valued at Torn market price. Negative quantities mean more has been sent out than recorded coming in.</p>
+      ${table([
+        { h: 'Item', f: r => esc(r.name) },
+        { h: 'Qty', n: 1, f: r => r.qty < 0 ? `<span class="warn">${fmt(r.qty)}</span>` : fmt(r.qty) },
+        { h: 'Each', n: 1, f: r => money(r.market_value) },
+        { h: 'Value', n: 1, f: r => money(r.qty * r.market_value) },
+      ], d.stock)}
+    </section>`;
     };
 
     pages.bankers = async () => {
@@ -1310,19 +1295,21 @@
         { h: 'Attacks', num: 1, sort: r => r.attacks || 0, f: r => fmt(r.attacks || 0) },
         { h: 'Score', num: 1, sort: r => r.score || 0, f: r => fmt(r.score || 0) },
         { h: 'Level', num: 1, sort: r => r.level, f: r => fmt(r.level) },
+        { h: 'Age', num: 1, sort: r => r.age || 0, f: r => fmt(r.age || 0) },
+        { h: 'Revivable', sort: r => (r.revivable ? 1 : 0), f: r => r.revivable ? '<span class="ok">Yes</span>' : 'No' },
         { h: 'Faction', sort: r => (r.faction || '').toLowerCase(), f: r => esc(r.faction) },
-        { h: 'Status', sort: r => (r.status || '').toLowerCase(), f: r => `<span class="dot" style="background:${SDOT[r.color] || 'var(--muted)'}"></span>${esc(r.status)}` },
+        { h: 'Status', sort: r => (r.state || '').toLowerCase(), f: r => `<span class="dot" style="background:${SDOT[r.color] || 'var(--muted)'}"></span><span title="${esc(r.sdetails)}">${esc(r.sdesc || r.state)}</span>` },
         { h: 'Last action', sort: r => -(r.act_ts || 0), f: r => `${esc(r.act)}<span style="color:var(--muted)"> · ${esc(r.rel)}</span>` },
         { h: 'Net worth', num: 1, sort: r => r.networth, f: r => money(r.networth) },
       ];
       // Default to most attacks first, the score that matters for the elimination.
       const state = { q: '', status: '', act: '', si: 1, dir: -1 };
-      const statuses = [...new Set(rows.map(r => r.status))].sort();
+      const statuses = [...new Set(rows.map(r => r.state))].sort();
 
       const render = () => {
         const q = state.q.toLowerCase();
         let out = rows.filter(r =>
-          (!state.status || r.status === state.status) &&
+          (!state.status || r.state === state.status) &&
           (!state.act || r.act === state.act) &&
           (!q || r.name.toLowerCase().includes(q) || String(r.id).includes(q) || (r.faction || '').toLowerCase().includes(q)));
         const col = cols[state.si];
@@ -1343,8 +1330,8 @@
     <div class="stats">
       <div class="stat"><b>${fmt(rows.length)}</b><span>Members</span></div>
       <div class="stat"><b>${fmt(rows.filter(r => r.act === 'Online').length)}</b><span>Online</span></div>
-      <div class="stat"><b>${fmt(rows.filter(r => r.status === 'Hospital').length)}</b><span>In hospital</span></div>
-      <div class="stat"><b>${fmt(rows.filter(r => r.status === 'Traveling' || r.status === 'Abroad').length)}</b><span>Traveling / abroad</span></div>
+      <div class="stat"><b>${fmt(rows.filter(r => r.state === 'Hospital').length)}</b><span>In hospital</span></div>
+      <div class="stat"><b>${fmt(rows.filter(r => r.state === 'Traveling' || r.state === 'Abroad').length)}</b><span>Traveling / abroad</span></div>
     </div>
     <div class="toolbar">
       <input id="tsQ" placeholder="Name, ID, or faction" style="width:240px" autocomplete="off">

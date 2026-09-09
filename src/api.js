@@ -149,20 +149,36 @@ export async function handleApi(request, env, ctx) {
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
       let d; try { d = JSON.parse(line); } catch { continue; }
+      // Tolerate both the flat snapshot shape and the nested Torn API v2 shape
+      // (status: {...}, states: {...}, last_action: {...}, competition: {...})
+      // so this keeps working when the live API feeds the file.
+      const st = d.status || {}, states = d.states || {}, la = d.last_action || {}, comp = d.competition || {};
+      let faction = d.faction && d.faction.faction_name ? d.faction.faction_name : '';
       const i9 = d.icon9 || '';
-      let faction = '';
-      if (i9.startsWith('Faction - ')) {
+      if (!faction && i9.startsWith('Faction - ')) {
         const rest = i9.slice('Faction - '.length);
         const i = rest.indexOf(' of ');
         faction = i >= 0 ? rest.slice(i + 4) : rest;
       }
       if (d.fetched_at > fetched_at) fetched_at = d.fetched_at;
       rows.push({
-        id: d.player_id, name: d.name, level: d.level, faction,
-        attacks: d.competition_attacks, score: d.competition_score,
-        status: d.status_state, color: d.status_color,
-        act: d.last_action_status, rel: d.last_action_relative,
-        act_ts: d.last_action_timestamp, networth: d.networth,
+        id: d.player_id ?? d.id,
+        name: d.name,
+        level: d.level,
+        age: d.age,
+        revivable: d.revivable,
+        faction,
+        attacks: d.competition_attacks ?? comp.attacks,
+        score: d.competition_score ?? comp.score,
+        state: d.status_state ?? st.state,
+        sdesc: (d.status_description ?? st.description ?? '').trim(),
+        sdetails: (d.status_details ?? st.details ?? '').trim(),
+        until: d.status_until ?? st.until,
+        color: d.status_color ?? st.color,
+        act: d.last_action_status ?? la.status,
+        rel: d.last_action_relative ?? la.relative,
+        act_ts: d.last_action_timestamp ?? la.timestamp,
+        networth: d.networth,
       });
     }
     return json({ rows, fetched_at });
