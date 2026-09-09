@@ -42,6 +42,13 @@ if (clearGuild) {
   console.log(`cleared guild ${clearGuild}:`, c.status, await c.text());
 }
 
+// CLEAR_GLOBAL=1 removes the global commands, e.g. when keeping guild-scoped
+// ones (which update instantly) as the single source and dropping the globals.
+if (process.env.CLEAR_GLOBAL) {
+  const c = await put(`/applications/${APP_ID}/commands`, []);
+  console.log('cleared global:', c.status, await c.text());
+}
+
 const guildId = process.env.GUILD_ID;
 const path = guildId
   ? `/applications/${APP_ID}/guilds/${guildId}/commands`
