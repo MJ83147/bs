@@ -13,21 +13,8 @@ const token = process.env.DISCORD_TOKEN;
 if (!token) { console.error('DISCORD_TOKEN not set'); process.exit(1); }
 
 const item = { name: 'item', description: 'Item', type: 3, required: true, autocomplete: true };
-const categoryChoices = [
-  { name: 'Xanax', value: 'xanax' },
-  { name: 'Other drugs', value: 'otherdrugs' },
-  { name: 'Ecans', value: 'ecans' },
-  { name: 'Med kits', value: 'med' },
-  { name: 'FHCs', value: 'fhc' },
-  { name: 'Temps', value: 'temps' },
-  { name: 'Wrong blood bag / ipecac', value: 'wrongblood' },
-];
 const commands = [
-  { name: 'request', description: 'Request items from the treasury', options: [
-    { name: 'category', description: 'What do you need', type: 3, required: true, choices: categoryChoices },
-    { name: 'item', description: 'Specific item (for med kits, temps, other drugs)', type: 3, required: false, autocomplete: true },
-    { name: 'qty', description: 'Quantity (default 1)', type: 4, required: false, min_value: 1 },
-  ] },
+  { name: 'request', description: 'Request items from the treasury' },
   { name: 'mystats', description: 'Your requests' },
   { name: 'contribute', description: 'Add your own items or cash to the treasury', options: [
     { name: 'item', description: 'Item you are contributing', type: 3, required: false, autocomplete: true },

@@ -1,7 +1,7 @@
 import { verifyDiscord, decrypt } from './crypto.js';
 import * as db from './db.js';
 import * as torn from './torn.js';
-import { CATEGORY_MODE, CATEGORY_LABELS, ENERGY_CATEGORIES, itemsInCategory, categoryOfItem } from './categories.js';
+import { CATEGORY_MODE, CATEGORY_LABELS, CATEGORY_KEYS, ENERGY_CATEGORIES, itemsInCategory, categoryOfItem } from './categories.js';
 
 const API = 'https://discord.com/api/v10';
 const EPHEMERAL = 64;
@@ -137,22 +137,57 @@ async function resolveItem(env, value) {
   return db.findItemByName(env.DB, value);
 }
 
-async function cmdRequest(interaction, env, cfg, ctx) {
-  const category = String(opt(interaction, 'category') || '');
-  const qty = Number(opt(interaction, 'qty')) || 1;
-  const itemOpt = opt(interaction, 'item');
+// /request opens a form (modal) with a category dropdown and a quantity box, so members
+// never have to type slash-command options. Specific categories get an item picker after.
+function cmdRequest(interaction, env, cfg) {
+  if (!cfg.requests_channel || !cfg.bankers_channel) return reply('Requests are not set up yet.');
+  return json({ type: 9, data: {
+    custom_id: 'req_form',
+    title: 'Request items',
+    components: [
+      { type: 18, label: 'What do you need', component: { type: 3, custom_id: 'category', placeholder: 'Pick a category', options: CATEGORY_KEYS.map(k => ({ label: CATEGORY_LABELS[k], value: k })) } },
+      { type: 18, label: 'Quantity', component: { type: 4, custom_id: 'qty', style: 1, value: '1', required: true, max_length: 6 } },
+    ],
+  } });
+}
+
+// Step 2 for specific categories: after the form, pick the exact item (qty carried in the id).
+async function requestForm(interaction, env, cfg, ctx) {
+  if (!cfg.requests_channel || !cfg.bankers_channel) return reply('Requests are not set up yet.');
+  const category = modalValue(interaction.data.components, 'category');
   const mode = CATEGORY_MODE[category];
   if (!mode) return reply('Unknown category.');
-  if (!cfg.requests_channel || !cfg.bankers_channel) return reply('Channels not configured.');
+  const qty = Math.max(1, Math.floor(Number(modalValue(interaction.data.components, 'qty')) || 1));
 
-  let item = null;
-  if (mode === 'single') {
-    item = await db.getItem(env.DB, itemsInCategory(category)[0]);
-  } else if (mode === 'specific') {
-    if (!itemOpt) return reply(`Pick a specific item for ${CATEGORY_LABELS[category]} using the item option.`);
-    item = await resolveItem(env, String(itemOpt));
-    if (!item || categoryOfItem(item.item_id) !== category) return reply(`That item is not in ${CATEGORY_LABELS[category]}.`);
+  if (mode !== 'specific') {
+    const item = mode === 'single' ? await db.getItem(env.DB, itemsInCategory(category)[0]) : null;
+    return submitRequest(interaction, env, cfg, ctx, { category, item, qty });
   }
+
+  const ids = itemsInCategory(category);
+  const ph = ids.map(() => '?').join(',');
+  const items = (await env.DB.prepare(`SELECT item_id, name FROM items WHERE item_id IN (${ph}) ORDER BY name`).bind(...ids).all()).results;
+  if (!items.length) return reply('No items configured for this category yet.');
+  const options = items.slice(0, 25).map(i => ({ label: i.name.slice(0, 100), value: String(i.item_id) }));
+  return json({ type: 4, data: {
+    flags: EPHEMERAL,
+    content: `Pick a ${CATEGORY_LABELS[category]} item (quantity ${fmt(qty)}):`,
+    components: [{ type: 1, components: [{ type: 3, custom_id: `req_item:${category}:${qty}`, placeholder: 'Pick an item', options }] }],
+  } });
+}
+
+// Item chosen from the picker. Create the request.
+async function requestItemPicked(interaction, env, cfg, ctx) {
+  const [, category, qtyStr] = interaction.data.custom_id.split(':');
+  const qty = Math.max(1, Math.floor(Number(qtyStr) || 1));
+  const item = await db.getItem(env.DB, Number(interaction.data.values?.[0]));
+  if (!item || categoryOfItem(item.item_id) !== category) return reply(`That item is not in ${CATEGORY_LABELS[category] || 'this category'}.`);
+  return submitRequest(interaction, env, cfg, ctx, { category, item, qty });
+}
+
+// Core request creation, shared by the request form and the item picker. Defers the reply
+// and does the slow Torn lookups + banker card in the background.
+function submitRequest(interaction, env, cfg, ctx, { category, item, qty }) {
   const label = CATEGORY_LABELS[category];
 
   ctx.waitUntil((async () => {
@@ -168,7 +203,9 @@ async function cmdRequest(interaction, env, cfg, ctx) {
       if (tornId) {
         try { const b = await torn.fetchBasic(key, tornId); tornName = b.name; } catch {}
         try { attacks = (await torn.fetchCompetition(key, tornId)).attacks ?? null; } catch {}
-        try { profile = await torn.fetchProfile(key, tornId); } catch {}
+        // Banker keys are scoped and lack the networth selection, so use the owner's
+        // full-access key for the profile/net-worth lookup when it is configured.
+        try { profile = await torn.fetchProfile(env.OWNER_API_KEY || key, tornId); } catch {}
       }
     }
 
@@ -263,7 +300,7 @@ export async function repostRequest(env, cfg, req) {
 
   let profile = null;
   if (req.torn_id) {
-    const key = await bankerKey(env, cfg);
+    const key = env.OWNER_API_KEY || await bankerKey(env, cfg);
     if (key) { try { profile = await torn.fetchProfile(key, req.torn_id); } catch {} }
   }
 
@@ -412,6 +449,8 @@ async function cmdThreshold(interaction, env) {
 
 async function component(interaction, env, cfg, ctx) {
   const [action, idStr] = interaction.data.custom_id.split(':');
+  // Member request flow: item picker after the request form. Open to everyone.
+  if (action === 'req_item') return requestItemPicked(interaction, env, cfg, ctx);
   const id = Number(idStr);
   if (!hasRole(interaction, cfg.banker_role) && !hasRole(interaction, cfg.council_role)) return reply('Banker role required.');
   const req = await db.getRequest(env.DB, id);
@@ -456,7 +495,10 @@ async function matchBanker(env, interaction) {
 // Label component, so search recursively rather than at a fixed depth.
 function modalValue(components, customId) {
   for (const c of components || []) {
-    if (c.custom_id === customId && c.value !== undefined) return c.value;
+    if (c.custom_id === customId) {
+      if (c.value !== undefined) return c.value;           // text input
+      if (Array.isArray(c.values)) return c.values[0];     // string select
+    }
     const nested = c.components || (c.component ? [c.component] : null);
     if (nested) { const v = modalValue(nested, customId); if (v !== undefined) return v; }
   }
@@ -465,6 +507,7 @@ function modalValue(components, customId) {
 
 async function modal(interaction, env, cfg, ctx) {
   const [action, idStr] = interaction.data.custom_id.split(':');
+  if (action === 'req_form') return requestForm(interaction, env, cfg, ctx);
   if (action !== 'decline_modal') return reply('Unknown modal.');
   const reason = modalValue(interaction.data.components, 'reason') || '';
   return cmdDecline(interaction, env, cfg, ctx, Number(idStr), reason, true);
