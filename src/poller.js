@@ -2,7 +2,7 @@ import { decrypt } from './crypto.js';
 import * as db from './db.js';
 import * as torn from './torn.js';
 import { post, edit, COLORS, requestStatusEmbed } from './discord.js';
-import { categoryOfItem } from './categories.js';
+import { categoryOfItem, CATEGORY_LABELS, CASH_CATEGORIES } from './categories.js';
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-GB');
 const money = (n) => '$' + fmt(n);
@@ -11,6 +11,18 @@ function parseItems(data) {
   if (Array.isArray(data.items)) return data.items.map(i => ({ id: Number(i.id), qty: Number(i.qty ?? i.quantity ?? 1) }));
   if (data.item) return [{ id: Number(data.item), qty: Number(data.qty ?? data.quantity ?? 1) }];
   return [];
+}
+
+// Config keyword may be a comma-separated list (e.g. "BS,donation"). Match if any
+// appears as a whole word, case-insensitively. Falls back to matching nothing if empty.
+export function buildKeywordRegex(raw) {
+  const words = (raw || '')
+    .split(',')
+    .map(w => w.trim())
+    .filter(Boolean)
+    .map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  if (!words.length) return { test: () => false };
+  return new RegExp(`\\b(${words.join('|')})\\b`, 'i');
 }
 
 function parseCash(data) {
@@ -41,12 +53,31 @@ async function refreshItems(env, key) {
   }
 }
 
+// Fetch the live Elimination standings and store a snapshot for the /elimination
+// page. Uses any active banker key (the endpoint returns public competition data).
+// Kept separate from poll() so it runs every tick regardless of log config.
+export async function pollElimination(env) {
+  // The torn/elimination selection needs higher access than scoped banker keys
+  // have (Torn error 16), so prefer the full-access owner key when configured.
+  let key = env.OWNER_API_KEY || null;
+  if (!key) {
+    const bankers = await db.getBankers(env.DB);
+    for (const b of bankers) {
+      try { key = await decrypt(env.ENCRYPTION_KEY, b.encrypted_key); break; } catch {}
+    }
+  }
+  if (!key) return;
+  let teams;
+  try { teams = await torn.fetchElimination(key); } catch (e) { console.log(`elimination: ${e.message}`); return; }
+  await db.recordElimination(env.DB, db.now(), teams);
+}
+
 export async function poll(env) {
   const cfg = await db.getConfig(env.DB);
   const bankers = await db.getBankers(env.DB);
   if (!bankers.length) return;
   const bankerIds = new Set(bankers.map(b => b.torn_id));
-  const keyword = new RegExp(`\\b${cfg.keyword}\\b`, 'i');
+  const keyword = buildKeywordRegex(cfg.keyword);
 
   const types = {
     itemSend: db.parseTypes(cfg.log_types_item_send),
@@ -116,6 +147,24 @@ export async function poll(env) {
             requestId = req.id;
             await env.DB.prepare(`UPDATE requests SET status = 'fulfilled', banker_id = ?, item_id = ?, handled_by = ?, updated_at = ? WHERE id = ?`).bind(banker.torn_id, r.item_id, banker.name, db.now(), req.id).run();
             const done = requestStatusEmbed(req.id, fmt(r.qty), r.name, req.torn_name, `Fulfilled, sent by ${banker.name}`, COLORS.fulfilled);
+            try {
+              if (req.public_message_id) await edit(env, cfg.requests_channel, req.public_message_id, { content: `<@${req.discord_id}>`, embeds: [done] });
+              if (req.banker_message_id) await edit(env, cfg.bankers_channel, req.banker_message_id, { embeds: [done], components: [] });
+            } catch (e) { console.log(e.message); }
+          }
+        } else if (kind === 'send' && type === 'cash' && CASH_CATEGORIES.length) {
+          // Cash-category requests (energy refill) are fulfilled by a matching cash
+          // send to the member with the keyword, since they have no item to match on.
+          const ph = CASH_CATEGORIES.map(() => '?').join(',');
+          const req = await env.DB.prepare(`SELECT id, discord_id, public_message_id, banker_message_id, torn_name, category FROM requests
+            WHERE status = 'approved' AND torn_id = ? AND (banker_id = ? OR banker_id IS NULL)
+              AND item_id IS NULL AND category IN (${ph})
+            ORDER BY created_at ASC LIMIT 1`).bind(counterpartyId, banker.torn_id, ...CASH_CATEGORIES).first();
+          if (req) {
+            requestId = req.id;
+            await env.DB.prepare(`UPDATE requests SET status = 'fulfilled', banker_id = ?, handled_by = ?, updated_at = ? WHERE id = ?`).bind(banker.torn_id, banker.name, db.now(), req.id).run();
+            const shown = `${CATEGORY_LABELS[req.category] || 'Cash'} (${money(r.qty)})`;
+            const done = requestStatusEmbed(req.id, '', shown, req.torn_name, `Fulfilled, sent by ${banker.name}`, COLORS.fulfilled);
             try {
               if (req.public_message_id) await edit(env, cfg.requests_channel, req.public_message_id, { content: `<@${req.discord_id}>`, embeds: [done] });
               if (req.banker_message_id) await edit(env, cfg.bankers_channel, req.banker_message_id, { embeds: [done], components: [] });

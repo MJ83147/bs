@@ -197,12 +197,30 @@
       padding-bottom: 4px;
     }
 
+    /* --- Role tabs --- */
+    .roletabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 0 0 20px;
+    }
+
+    .rtab {
+      border: 1.5px solid var(--rule);
+      border-radius: 999px;
+      padding: 7px 16px;
+      font-weight: 600;
+      font-size: 13.5px;
+      background: none;
+    }
+
+    /* --- Big coverage heatmap (the main element) --- */
     .heat {
       display: grid;
-      grid-template-columns: 34px repeat(24, minmax(0, 18px));
-      gap: 2px;
+      grid-template-columns: 46px repeat(24, minmax(0, 1fr));
+      gap: 3px;
       align-items: center;
-      justify-content: start;
+      min-width: 720px;
     }
 
     .heat .hx {
@@ -213,36 +231,64 @@
     }
 
     .heat .hy {
-      font-size: 11px;
+      font-size: 12.5px;
       color: var(--muted);
       text-align: right;
-      padding-right: 6px;
+      padding-right: 8px;
     }
 
     .heat .cell {
-      aspect-ratio: 1 / 1;
-      border-radius: 2px;
+      height: 40px;
+      border-radius: 3px;
       background: var(--soft);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: var(--ink);
+      text-shadow: 0 0 2px var(--paper);
+    }
+
+    .heat .cell.zero {
+      color: color-mix(in srgb, var(--ink) 45%, transparent);
     }
 
     .legend {
       display: flex;
       align-items: center;
-      gap: 8px;
-      margin-top: 14px;
+      flex-wrap: wrap;
+      gap: 6px 16px;
+      margin-top: 16px;
       font-size: 12.5px;
       color: var(--muted);
     }
 
-    .legend .ramp {
+    .legend span {
       display: inline-flex;
-      gap: 2px;
+      align-items: center;
+      gap: 6px;
     }
 
-    .legend .ramp i {
-      width: 14px;
-      height: 12px;
-      border-radius: 2px;
+    .legend i {
+      width: 18px;
+      height: 14px;
+      border-radius: 3px;
+      display: inline-block;
+    }
+
+    .badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .03em;
+      padding: 1px 7px;
+      border-radius: 999px;
+      color: #fff;
+      margin-left: 6px;
+      vertical-align: middle;
     }
 
     .empty {
@@ -460,13 +506,16 @@
     </header>
     <main>
       <h2>Team coverage</h2>
-      <p class="page-desc">When the support team is usually around, in Torn City Time (TCT). Darker means more people
-        available that hour. Add your own hours with the button above.</p>
+      <p class="page-desc">When the team is usually around, in Torn City Time (TCT). Pick a role to see just their
+        coverage. Red cells are dead zones with no one around; the more people, the stronger the colour. Add your own
+        hours with the button up top.</p>
+      <div id="roleTabs" class="roletabs"></div>
       <div class="card">
         <div id="overview" class="scroll"></div>
         <div id="legend"></div>
+        <p id="overviewNote" class="meta" style="color:var(--muted);font-size:12.5px;margin:14px 0 0"></p>
       </div>
-      <div id="roster"></div>
+      <div id="roster" style="margin-top:8px"></div>
     </main>
   </div>
 
@@ -523,6 +572,21 @@
     ];
     const ALL_NAMES = ROSTER.flatMap(g => g.names);
 
+    // Treasurer is a role that overlays existing people (they keep their group above).
+    const TREASURER = ['dusche', 'mob', 'unique', 'strain', 'systoned'];
+
+    // Coverage views. Org-group roles are derived from ROSTER so they never drift;
+    // Treasurer is an explicit overlay. Each has its own colour for the heatmap + tab.
+    const GROUP_COLORS = { 'Leader': '#7C5CBF', 'Vice': '#2F6DB0', 'Support staff': '#2E8B57' };
+    const ROLES = [
+      { key: 'all', label: 'Everyone', color: 'var(--accent)', names: ALL_NAMES },
+      ...ROSTER.map(g => ({ key: g.group, label: g.group, color: GROUP_COLORS[g.group] || 'var(--accent)', names: g.names })),
+      { key: 'treasurer', label: 'Treasurer', color: '#C8871E', names: TREASURER },
+    ];
+    const primaryGroup = name => (ROSTER.find(g => g.names.includes(name)) || {}).group || '';
+    const rolesOf = name => [primaryGroup(name), ...(TREASURER.includes(name) ? ['Treasurer'] : [])].filter(Boolean);
+    let activeRole = 'all';
+
     // Timezone options (context only; the grid itself is always TCT). Offsets ignore DST.
     const TIMEZONES = [
       'UTC / TCT',
@@ -557,32 +621,60 @@
 
     async function load() {
       try { people = await api('/coverage/data'); } catch { return; }
+      renderRoleTabs();
       renderOverview();
       renderRoster();
     }
 
-    // --- Read-only team coverage heatmap: cell = number of people available. ---
+    function renderRoleTabs() {
+      $('#roleTabs').innerHTML = ROLES.map(r => {
+        const on = r.key === activeRole;
+        const style = on ? `background:${r.color};border-color:${r.color};color:#fff` : `border-color:${r.color}`;
+        return `<button class="rtab" data-role="${esc(r.key)}" style="${style}">${esc(r.label)}</button>`;
+      }).join('');
+      $('#roleTabs').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+        activeRole = b.dataset.role; renderRoleTabs(); renderOverview();
+      }));
+    }
+
+    const DEAD = 'color-mix(in srgb, var(--warn) 34%, var(--soft))'; // 0 people = dead zone
+    const covColor = (n, max, color) => n === 0 ? DEAD
+      : `color-mix(in srgb, ${color} ${32 + Math.round(n / max * 68)}%, var(--soft))`;
+
+    // --- Read-only coverage heatmap for the active role: cell = people available. ---
     function renderOverview() {
+      const role = ROLES.find(r => r.key === activeRole) || ROLES[0];
+      const members = role.names;
       const counts = Array.from({ length: 7 }, () => new Array(24).fill(0));
       const names = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => []));
-      for (const p of people) {
+      const filled = people.filter(p => members.includes(p.name));
+      for (const p of filled) {
         const g = slotsToGrid(p.slots);
         for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) if (g[d][h]) { counts[d][h]++; names[d][h].push(p.name); }
       }
-      const total = people.length;
-      if (!total) { $('#overview').innerHTML = `<p class="empty">No one has added their hours yet. Be the first with the button above.</p>`; $('#legend').innerHTML = ''; return; }
-      const max = Math.max(1, ...counts.flat());
+      const total = members.length;           // how many could be around = denominator
+      const max = Math.max(1, total);
       const cell = (n, d, h) => {
-        const pct = n ? 18 + Math.round(n / max * 82) : 0;
-        const bg = n ? `background:color-mix(in srgb, var(--accent) ${pct}%, var(--soft))` : '';
-        const who = n ? ` — ${esc(names[d][h].join(', '))}` : '';
-        return `<div class="cell" style="${bg}" title="${DAYS[d]} ${String(h).padStart(2, '0')}:00 TCT — ${n} of ${total} available${who}"></div>`;
+        const who = n
+          ? names[d][h].map(nm => activeRole === 'all' ? `${nm} (${rolesOf(nm).join(', ')})` : nm).join(', ')
+          : '';
+        const title = n
+          ? `${DAYS[d]} ${String(h).padStart(2, '0')}:00 TCT — ${n} of ${total}: ${who}`
+          : `${DAYS[d]} ${String(h).padStart(2, '0')}:00 TCT — dead zone, no one around`;
+        return `<div class="cell${n ? '' : ' zero'}" style="background:${covColor(n, max, role.color)}" title="${esc(title)}">${n}</div>`;
       };
-      const hourAxis = ['<div></div>', ...Array.from({ length: 24 }, (_, h) => `<div class="hx">${h % 3 === 0 ? h : ''}</div>`)].join('');
+      const hourAxis = ['<div></div>', ...Array.from({ length: 24 }, (_, h) => `<div class="hx">${h}</div>`)].join('');
       const rows = counts.map((row, d) => `<div class="hy">${DAYS[d]}</div>${row.map((n, h) => cell(n, d, h)).join('')}`).join('');
       $('#overview').innerHTML = `<div class="heat">${hourAxis}${rows}</div>`;
-      const swatches = [0.2, 0.45, 0.7, 1].map(f => `<i style="background:color-mix(in srgb, var(--accent) ${18 + Math.round(f * 82)}%, var(--soft))"></i>`).join('');
-      $('#legend').innerHTML = `<div class="legend"><span>Fewer</span><span class="ramp">${swatches}</span><span>More (up to ${max} of ${total})</span></div>`;
+
+      const steps = [`<span><i style="background:${DEAD}"></i>none</span>`];
+      for (let c = 1; c <= max; c++) steps.push(`<span><i style="background:${covColor(c, max, role.color)}"></i>${c}</span>`);
+      $('#legend').innerHTML = `<div class="legend">${steps.join('')}</div>`;
+
+      const missing = members.filter(m => !filled.some(p => p.name === m));
+      $('#overviewNote').textContent = missing.length
+        ? `Not filled in yet (${role.label}): ${missing.join(', ')}`
+        : `Everyone in ${role.label} has filled in their hours.`;
     }
 
     function renderRoster() {
@@ -591,8 +683,9 @@
         const p = byName(name);
         const hrs = p ? (p.slots || '').split('').filter(c => c === '1').length : 0;
         const meta = p ? `${p.timezone ? esc(p.timezone) : 'no timezone set'} · ${hrs} hr/wk` : 'not filled in yet';
+        const badge = TREASURER.includes(name) ? `<span class="badge" style="background:#C8871E">Treasurer</span>` : '';
         return `<div class="rperson">
-          <div><b>${esc(name)}</b><div class="meta">${meta}</div></div>
+          <div><b>${esc(name)}</b>${badge}<div class="meta">${meta}</div></div>
           <button data-name="${esc(name)}">Edit</button>
         </div>`;
       };

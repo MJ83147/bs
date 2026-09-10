@@ -87,6 +87,70 @@ export async function handleApi(request, env, ctx) {
     return json({ error: 'not found' }, 404);
   }
 
+  // --- Tick ingest from an external scraper. Bearer token, not the site login.
+  if (path === '/ticks/ingest' && method === 'POST') {
+    const auth = request.headers.get('Authorization') || '';
+    if (!env.TICK_INGEST_TOKEN || auth !== `Bearer ${env.TICK_INGEST_TOKEN}`) return json({ error: 'unauthorised' }, 401);
+    const body = await request.json().catch(() => null);
+    const docs = Array.isArray(body) ? body : body ? [body] : null;
+    if (!docs) return json({ error: 'expected a period document or array of them' }, 400);
+    const t = db.now();
+    const periodStmt = env.DB.prepare(`INSERT INTO tick_periods (period_start, period_end, event, attacks, active_players, matched_players, complete_coverage, payload, received_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(period_start) DO UPDATE SET period_end = excluded.period_end, attacks = excluded.attacks, active_players = excluded.active_players,
+        matched_players = excluded.matched_players, complete_coverage = excluded.complete_coverage, payload = excluded.payload, received_at = excluded.received_at`);
+    const hitStmt = env.DB.prepare(`INSERT OR REPLACE INTO tick_hits (period_start, player_id, name, bucket, increments, counter_before, counter_after, observation_start, observation_end)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const batch = [];
+    let periods = 0, hits = 0;
+    for (const d of docs) {
+      const p = d.period || {};
+      if (!p.nominal_start_unix) continue;
+      periods++;
+      batch.push(periodStmt.bind(p.nominal_start_unix, p.nominal_end_unix ?? p.nominal_start_unix + 900, d.event ?? null, p.attacks ?? null,
+        p.active_players ?? null, p.matched_players ?? null, p.complete_coverage ? 1 : 0, JSON.stringify(d), t));
+      for (const bucket of ['pre_tick', 'post_tick']) {
+        for (const h of (d.players?.[bucket] || [])) {
+          if (!h.player_id) continue;
+          hits++;
+          batch.push(hitStmt.bind(p.nominal_start_unix, h.player_id, h.name ?? null, bucket, h.increments ?? 0,
+            h.counter_before ?? null, h.counter_after ?? null, h.observation_start_utc ?? null, h.observation_end_utc ?? null));
+        }
+      }
+    }
+    if (!batch.length) return json({ error: 'no period.nominal_start_unix found' }, 400);
+    await env.DB.batch(batch);
+    return json({ ok: true, periods, hits });
+  }
+
+  // --- Elimination standings. Public (feeds the unlinked /elimination page),
+  // so handled before the banker-site login gate. Serves the latest stored
+  // snapshot plus score history; falls back to a live fetch if nothing is stored
+  // yet (e.g. before the poller has run).
+  if (path === '/elimination' && method === 'GET') {
+    let teams = await db.latestElimination(env.DB);
+    if (!teams.length) {
+      // Prefer the full-access owner key: scoped banker keys can't read the
+      // torn/elimination selection (Torn error 16).
+      let key = env.OWNER_API_KEY || null;
+      if (!key) {
+        const bankers = await db.getBankers(env.DB);
+        for (const b of bankers) { try { key = await decrypt(env.ENCRYPTION_KEY, b.encrypted_key); break; } catch {} }
+      }
+      if (key) {
+        try {
+          const live = await torn.fetchElimination(key);
+          await db.recordElimination(env.DB, db.now(), live);
+          teams = await db.latestElimination(env.DB);
+        } catch (e) { return json({ error: e.message }, 502); }
+      }
+    }
+    const hours = Math.min(Number(url.searchParams.get('hours') || 24) || 24, 168);
+    const history = await db.eliminationHistory(env.DB, db.now() - hours * 3600);
+    const fetched_at = teams.reduce((m, t) => Math.max(m, t.ts), 0);
+    return json({ fetched_at, hours, teams, history });
+  }
+
   if (!(await isAuthed(request, env))) return json({ error: 'unauthorised' }, 401);
 
   const cfg = await db.getConfig(env.DB);
@@ -182,6 +246,20 @@ export async function handleApi(request, env, ctx) {
       });
     }
     return json({ rows, fetched_at });
+  }
+
+  if (path === '/ticks/leaderboard' && method === 'GET') {
+    const since = Number(url.searchParams.get('since') || 0);
+    const rows = (await env.DB.prepare(`SELECT player_id, MAX(name) AS name,
+        SUM(CASE WHEN bucket = 'pre_tick' THEN increments ELSE 0 END) AS pre_tick_hits,
+        SUM(CASE WHEN bucket = 'pre_tick' THEN 1 ELSE 0 END) AS scoring_ticks,
+        SUM(CASE WHEN bucket = 'post_tick' THEN increments ELSE 0 END) AS post_tick_hits
+      FROM tick_hits WHERE period_start >= ? GROUP BY player_id ORDER BY pre_tick_hits DESC, scoring_ticks DESC LIMIT 500`).bind(since).all()).results;
+    const latest = await env.DB.prepare('SELECT period_start, period_end, attacks, active_players, matched_players, complete_coverage, received_at FROM tick_periods ORDER BY period_start DESC LIMIT 1').first();
+    return json({ latest, rows });
+  }
+  if (path === '/ticks/periods' && method === 'GET') {
+    return json((await env.DB.prepare('SELECT period_start, period_end, attacks, active_players, matched_players, complete_coverage, received_at FROM tick_periods ORDER BY period_start DESC LIMIT 200').all()).results);
   }
 
   if (path === '/bankers' && method === 'GET') {

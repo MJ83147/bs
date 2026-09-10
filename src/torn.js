@@ -21,6 +21,22 @@ export async function fetchCompetition(key, tornId) {
   return { name: c.name, team: c.team, score: c.score, attacks: c.attacks };
 }
 
+export async function fetchElimination(key) {
+  const data = await get(`${BASE}/v2/torn/elimination?key=${key}`);
+  const list = data.elimination || [];
+  return list.map(t => ({
+    id: t.id,
+    name: t.name,
+    participants: t.participants ?? null,
+    position: t.position ?? null,
+    score: t.score ?? 0,
+    lives: t.lives ?? null,
+    wins: t.wins ?? 0,
+    losses: t.losses ?? 0,
+    eliminated: !!t.eliminated,
+  }));
+}
+
 export async function fetchTornIdFromDiscord(key, discordId) {
   const data = await get(`${BASE}/user/${discordId}?selections=discord&key=${key}`);
   return data.discord ? Number(data.discord.userID) : null;

@@ -287,6 +287,20 @@
     ul.items li.more {
       color: var(--muted);
       justify-content: flex-start;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    ul.items li.more:hover {
+      color: var(--ink);
+    }
+
+    ul.items li.hidden {
+      display: none;
+    }
+
+    ul.items.expanded li.hidden {
+      display: flex;
     }
 
     .dot {
@@ -857,7 +871,7 @@
     const money = n => '$' + fmt(n);
     const when = ts => { const d = new Date(ts * 1000); return d.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); };
     const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-    const CAT_LABELS = { xanax: 'Xanax', otherdrugs: 'Other drugs', ecans: 'Ecans', med: 'Med kits', fhc: 'FHCs', temps: 'Temps', wrongblood: 'Wrong blood bag / ipecac' };
+    const CAT_LABELS = { xanax: 'Xanax', otherdrugs: 'Other drugs', ecans: 'Ecans', med: 'Med kits', fhc: 'FHCs', temps: 'Temps', wrongblood: 'Wrong blood bag / ipecac', energyrefill: 'Energy refill' };
     const reqItem = r => `${fmt(r.qty)} x ${esc(r.item_name || CAT_LABELS[r.category] || r.category || '')}`;
 
     async function api(path, opts = {}) {
@@ -1012,10 +1026,9 @@
       const totalStock = rows.reduce((s, b) => s + b.stock_value, 0);
       const activeCount = rows.filter(b => b.active).length;
       const card = b => {
-        const top = b.items.slice(0, 5);
-        const rest = b.items.length - top.length;
+        const rest = b.items.length - 5;
         const items = b.items.length
-          ? `<ul class="items">${top.map(it => `<li><span>${esc(it.name)}</span><span class="n">${fmt(it.qty)}</span></li>`).join('')}${rest > 0 ? `<li class="more">+${fmt(rest)} more</li>` : ''}</ul>`
+          ? `<ul class="items">${b.items.map((it, i) => `<li${i >= 5 ? ' class="hidden"' : ''}><span>${esc(it.name)}</span><span class="n">${fmt(it.qty)}</span></li>`).join('')}${rest > 0 ? `<li class="more" onclick="this.parentNode.classList.add('expanded');this.remove();">+${fmt(rest)} more</li>` : ''}</ul>`
           : `<p class="section-desc" style="margin:0">No stock on hand.</p>`;
         return `<div class="card${b.active ? '' : ' off'}">
       <div class="card-head"><b>${esc(b.name)}</b><span class="id">${b.torn_id}${b.active ? '' : ' · removed'}</span></div>
@@ -1387,6 +1400,7 @@
         ['requests_channel', 'Requests channel ID'], ['bankers_channel', 'Bankers channel ID'], ['log_channel', 'Log channel ID'],
         ['council_role', 'Council role ID'], ['banker_role', 'Banker role ID'], ['keyword', 'Keyword'],
         ['leech_min_attacks', 'Flag below this many attacks'], ['leech_min_requests', 'Flag at this many fulfilled requests'],
+        ['energy_refill_amount', 'Energy refill amount ($)'], ['energy_min_attacks_per_day', 'Energy refill: attacks required per day'], ['comp_start', 'Competition start date (YYYY-MM-DD)'],
       ];
       const keyUrl = 'https://www.torn.com/preferences.php#tab=api?step=addNewKey&user=basic,log,discord,competition&torn=items&logIds=85,112,18,11&title=brainS';
       $('#main').innerHTML = `

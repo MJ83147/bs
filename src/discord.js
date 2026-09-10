@@ -2,7 +2,7 @@ import { verifyDiscord, decrypt } from './crypto.js';
 import * as db from './db.js';
 import * as torn from './torn.js';
 import { commands } from './commands.js';
-import { CATEGORY_MODE, CATEGORY_LABELS, CATEGORY_KEYS, ENERGY_CATEGORIES, itemsInCategory, categoryOfItem } from './categories.js';
+import { CATEGORY_MODE, CATEGORY_LABELS, CATEGORY_KEYS, REQUEST_CATEGORY_KEYS, ENERGY_CATEGORIES, isCashCategory, itemsInCategory } from './categories.js';
 
 const API = 'https://discord.com/api/v10';
 const EPHEMERAL = 64;
@@ -31,6 +31,20 @@ const money = (n) => '$' + fmt(n);
 const displayName = (i) => i.member?.nick || i.member?.user?.global_name || i.member?.user?.username || i.user?.username;
 const reqLabel = (r) => r.item_name || CATEGORY_LABELS[r.category] || r.category || 'items';
 
+// Cash value of one energy-refill request (a "token"), configurable via settings.
+const refillAmount = (cfg) => Number(cfg.energy_refill_amount || 1000000);
+
+// Attacks a member needs to be eligible for an energy refill today: the per-day
+// requirement times the number of days since the competition started (day 1 on the
+// start day). Returns null when comp_start is unset/invalid, which disables the gate.
+function requiredRefillAttacks(cfg) {
+  const startMs = Date.parse(`${cfg.comp_start || ''}T00:00:00Z`);
+  if (!cfg.comp_start || Number.isNaN(startMs)) return null;
+  const perDay = Number(cfg.energy_min_attacks_per_day || 30);
+  const days = Math.floor((db.now() * 1000 - startMs) / 86400000) + 1;
+  return perDay * Math.max(1, days);
+}
+
 // Preset quantities for the request flow's quantity dropdown (no free-text box,
 // so the flow is all selects with no "Submit" button).
 const QTY_PRESETS = [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 100];
@@ -52,7 +66,9 @@ export const COLORS = {
 
 // Status line + colour for a request in whatever state it is in.
 export function requestStatusEmbed(id, qty, shown, who, status, color) {
-  return { title: `Request #${id}`, color, description: `**${qty} x ${shown}**\nfor ${who}`, fields: [{ name: 'Status', value: status, inline: false }] };
+  // qty is blank for cash requests (e.g. energy refill), where "N x" reads wrong.
+  const what = qty === '' || qty == null ? shown : `${qty} x ${shown}`;
+  return { title: `Request #${id}`, color, description: `**${what}**\nfor ${who}`, fields: [{ name: 'Status', value: status, inline: false }] };
 }
 
 // Banker card buttons: Approve/Decline plus link buttons out to the member's
@@ -197,7 +213,7 @@ function cmdRequest(interaction, env, cfg) {
     flags: EPHEMERAL,
     content: 'What do you need?',
     components: [{ type: 1, components: [{ type: 3, custom_id: 'req_cat', placeholder: 'Pick a category',
-      options: CATEGORY_KEYS.map(k => ({ label: CATEGORY_LABELS[k], value: k })) }] }],
+      options: REQUEST_CATEGORY_KEYS.map(k => ({ label: CATEGORY_LABELS[k], value: k })) }] }],
   } });
 }
 
@@ -223,10 +239,13 @@ function qtyRow(category, itemId) {
 }
 
 // Category chosen. specific -> item dropdown; single/bucket -> straight to quantity.
-async function requestCategory(interaction, env, cfg) {
+async function requestCategory(interaction, env, cfg, ctx) {
   const category = interaction.data.values?.[0];
   const mode = CATEGORY_MODE[category];
   if (!mode) return updateMsg('Unknown category.');
+  // Cash categories (energy refill) have no item and a fixed amount, so skip the
+  // item and quantity steps and create the request straight away.
+  if (mode === 'cash') return submitRequest(interaction, env, cfg, ctx, { category, item: null, qty: 1 });
   if (mode !== 'specific') return updateMsg(`How many **${CATEGORY_LABELS[category]}**?`, qtyRow(category, ''));
   const ids = itemsInCategory(category);
   const ph = ids.map(() => '?').join(',');
@@ -239,7 +258,7 @@ async function requestCategory(interaction, env, cfg) {
 async function requestItem(interaction, env, cfg) {
   const category = interaction.data.custom_id.split(':')[1];
   const item = await db.getItem(env.DB, Number(interaction.data.values?.[0]));
-  if (!item || categoryOfItem(item.item_id) !== category) return updateMsg(`That item is not in ${CATEGORY_LABELS[category] || 'this category'}.`);
+  if (!item || !itemsInCategory(category).includes(item.item_id)) return updateMsg(`That item is not in ${CATEGORY_LABELS[category] || 'this category'}.`);
   return updateMsg(`How many **${item.name}**?`, qtyRow(category, item.item_id));
 }
 
@@ -252,7 +271,7 @@ async function requestQty(interaction, env, cfg, ctx) {
   let item = null;
   if (mode === 'specific') {
     item = await db.getItem(env.DB, Number(itemIdStr));
-    if (!item || categoryOfItem(item.item_id) !== category) return updateMsg('That item is no longer valid, try again.');
+    if (!item || !itemsInCategory(category).includes(item.item_id)) return updateMsg('That item is no longer valid, try again.');
   } else if (mode === 'single') {
     item = await db.getItem(env.DB, itemsInCategory(category)[0]);
   }
@@ -295,27 +314,34 @@ function submitRequest(interaction, env, cfg, ctx, { category, item, qty }) {
       if (prior && attacks <= prior.attacks_at_request) doubleDip = true;
     }
 
+    const cash = isCashCategory(category);
+    const amount = cash ? refillAmount(cfg) * qty : 0;
+    const required = cash ? requiredRefillAttacks(cfg) : null;
     const itemLabel = item ? item.name : label;
-    const stockQty = item ? await db.stockFor(env.DB, item.item_id) : await db.stockForItems(env.DB, itemsInCategory(category));
+    const stockQty = cash ? null : (item ? await db.stockFor(env.DB, item.item_id) : await db.stockForItems(env.DB, itemsInCategory(category)));
     const threshold = item ? await env.DB.prepare('SELECT min_attacks FROM item_thresholds WHERE item_id = ?').bind(item.item_id).first() : null;
     const t = db.now();
     const ins = await env.DB.prepare(`INSERT INTO requests (discord_id, torn_id, torn_name, item_id, category, qty, attacks_at_request, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`).bind(discordId, tornId, tornName, item?.item_id ?? null, category, qty, attacks, t, t).run();
     const id = ins.meta.last_row_id;
 
-    let totalReqs = 0, fulfilledReqs = 0, history = [];
+    let totalReqs = 0, fulfilledReqs = 0, history = [], donated = null;
     if (tornId) {
       const c = await env.DB.prepare(`SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN status = 'fulfilled' THEN 1 ELSE 0 END), 0) AS fulfilled FROM requests WHERE torn_id = ?`).bind(tornId).first();
       totalReqs = c?.total || 0; fulfilledReqs = c?.fulfilled || 0;
       history = await db.recentRequestsFor(env.DB, tornId, id);
+      donated = await db.donatedBy(env.DB, tornId);
     }
     const who = tornId ? `${tornName} [${tornId}]` : tornName;
-    const shown = item ? item.name : `${label} (any)`;
+    const shown = cash ? label : (item ? item.name : `${label} (any)`);
     const fields = [
       { name: 'Member', value: `${who}\n<@${discordId}>`, inline: true },
       { name: 'Hits (elimination)', value: attacks === null ? 'unknown' : fmt(attacks), inline: true },
-      { name: 'Stock', value: fmt(stockQty), inline: true },
+      cash
+        ? { name: 'Amount', value: money(amount), inline: true }
+        : { name: 'Stock', value: fmt(stockQty), inline: true },
     ];
+    if (cash && required !== null) fields.push({ name: 'Hits required', value: fmt(required), inline: true });
     if (profile) {
       fields.push(
         { name: 'Level', value: profile.level == null ? 'unknown' : fmt(profile.level), inline: true },
@@ -324,12 +350,17 @@ function submitRequest(interaction, env, cfg, ctx, { category, item, qty }) {
       );
     }
     fields.push({ name: 'Requests', value: `${fmt(totalReqs)} total, ${fmt(fulfilledReqs)} fulfilled`, inline: false });
+    if (donated) fields.push({ name: 'Donated', value: donated.total_value ? `${money(donated.total_value)} (${fmt(donated.item_qty)} items, ${money(donated.cash)} cash)` : 'none', inline: false });
     if (history.length) fields.push({ name: 'Recent requests', value: history.map(h => `\`#${h.id}\` ${fmt(h.qty)} x ${reqLabel(h)} — ${h.status}`).join('\n').slice(0, 1024), inline: false });
     const warnings = [];
     if (threshold && attacks !== null && attacks < threshold.min_attacks) {
       warnings.push(`Below threshold of ${fmt(threshold.min_attacks)} attacks for ${item.name}.`);
     }
-    if (stockQty < qty) warnings.push(`Only ${fmt(stockQty)} in stock.`);
+    if (cash && required !== null) {
+      if (attacks === null) warnings.push(`Attacks could not be read (needs ${fmt(required)} for a refill).`);
+      else if (attacks < required) warnings.push(`Not eligible: ${fmt(attacks)} attacks, needs ${fmt(required)} for an energy refill.`);
+    }
+    if (!cash && stockQty < qty) warnings.push(`Only ${fmt(stockQty)} in stock.`);
     if (doubleDip) warnings.push(`No attacks made since their last energy request (possible double-dip).`);
     if (tornId) {
       const minA = Number(cfg.leech_min_attacks || 0), minR = Number(cfg.leech_min_requests || 0);
@@ -339,15 +370,17 @@ function submitRequest(interaction, env, cfg, ctx, { category, item, qty }) {
     }
     if (warnings.length) fields.push({ name: '⚠️ Warnings', value: warnings.map(w => `• ${w}`).join('\n'), inline: false });
 
-    const pub = await post(env, cfg.requests_channel, { embeds: [requestStatusEmbed(id, qty, shown, who, 'Open', COLORS.open)] });
+    const qtyShown = cash ? '' : qty;
+    const cardWhat = cash ? `${shown} (${money(amount)})` : `${qty} x ${shown}`;
+    const pub = await post(env, cfg.requests_channel, { embeds: [requestStatusEmbed(id, qtyShown, shown, who, 'Open', COLORS.open)] });
     const bank = await post(env, cfg.bankers_channel, {
       content: cfg.banker_role ? `<@&${cfg.banker_role}>` : undefined,
       allowed_mentions: cfg.banker_role ? { roles: [cfg.banker_role] } : undefined,
-      embeds: [{ title: `Request #${id}`, description: `**${qty} x ${shown}**`, color: warnings.length ? COLORS.declined : COLORS.open, fields }],
+      embeds: [{ title: `Request #${id}`, description: `**${cardWhat}**`, color: warnings.length ? COLORS.declined : COLORS.open, fields }],
       components: bankerButtons(id, tornId),
     });
     await env.DB.prepare('UPDATE requests SET public_message_id = ?, banker_message_id = ? WHERE id = ?').bind(pub.id, bank.id, id).run();
-    await followup(env, interaction.token, { content: `Request #${id} submitted: ${qty} x ${shown}.`, components: [] });
+    await followup(env, interaction.token, { content: `Request #${id} submitted: ${cardWhat}.`, components: [] });
   })().catch(async (e) => {
     console.log('request failed', e.message);
     await followup(env, interaction.token, { content: `Request failed: ${e.message}`, components: [] });
@@ -363,14 +396,18 @@ export async function repostRequest(env, cfg, req) {
   if (!cfg.requests_channel || !cfg.bankers_channel) throw new Error('Channels not configured.');
   const shown = req.item_name || CATEGORY_LABELS[req.category] || req.category || 'items';
   const who = req.torn_id ? `${req.torn_name} [${req.torn_id}]` : req.torn_name;
-  const stockQty = req.item_id ? await db.stockFor(env.DB, req.item_id) : await db.stockForItems(env.DB, itemsInCategory(req.category));
+  const cash = isCashCategory(req.category);
+  const amount = cash ? refillAmount(cfg) * req.qty : 0;
+  const required = cash ? requiredRefillAttacks(cfg) : null;
+  const stockQty = cash ? null : (req.item_id ? await db.stockFor(env.DB, req.item_id) : await db.stockForItems(env.DB, itemsInCategory(req.category)));
   const attacks = req.attacks_at_request;
 
-  let totalReqs = 0, fulfilledReqs = 0, history = [];
+  let totalReqs = 0, fulfilledReqs = 0, history = [], donated = null;
   if (req.torn_id) {
     const c = await env.DB.prepare(`SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN status = 'fulfilled' THEN 1 ELSE 0 END), 0) AS fulfilled FROM requests WHERE torn_id = ?`).bind(req.torn_id).first();
     totalReqs = c?.total || 0; fulfilledReqs = c?.fulfilled || 0;
     history = await db.recentRequestsFor(env.DB, req.torn_id, req.id);
+    donated = await db.donatedBy(env.DB, req.torn_id);
   }
 
   let profile = null;
@@ -382,8 +419,11 @@ export async function repostRequest(env, cfg, req) {
   const fields = [
     { name: 'Member', value: `${who}\n<@${req.discord_id}>`, inline: true },
     { name: 'Hits (elimination)', value: attacks == null ? 'unknown' : fmt(attacks), inline: true },
-    { name: 'Stock', value: fmt(stockQty), inline: true },
+    cash
+      ? { name: 'Amount', value: money(amount), inline: true }
+      : { name: 'Stock', value: fmt(stockQty), inline: true },
   ];
+  if (cash && required !== null) fields.push({ name: 'Hits required', value: fmt(required), inline: true });
   if (profile) {
     fields.push(
       { name: 'Level', value: profile.level == null ? 'unknown' : fmt(profile.level), inline: true },
@@ -392,6 +432,7 @@ export async function repostRequest(env, cfg, req) {
     );
   }
   fields.push({ name: 'Requests', value: `${fmt(totalReqs)} total, ${fmt(fulfilledReqs)} fulfilled`, inline: false });
+  if (donated) fields.push({ name: 'Donated', value: donated.total_value ? `${money(donated.total_value)} (${fmt(donated.item_qty)} items, ${money(donated.cash)} cash)` : 'none', inline: false });
   if (history.length) fields.push({ name: 'Recent requests', value: history.map(h => `\`#${h.id}\` ${fmt(h.qty)} x ${reqLabel(h)} — ${h.status}`).join('\n').slice(0, 1024), inline: false });
 
   const warnings = [];
@@ -399,18 +440,23 @@ export async function repostRequest(env, cfg, req) {
     const threshold = await env.DB.prepare('SELECT min_attacks FROM item_thresholds WHERE item_id = ?').bind(req.item_id).first();
     if (threshold && attacks != null && attacks < threshold.min_attacks) warnings.push(`Below threshold of ${fmt(threshold.min_attacks)} attacks for ${shown}.`);
   }
-  if (stockQty < req.qty) warnings.push(`Only ${fmt(stockQty)} in stock.`);
+  if (cash && required !== null) {
+    if (attacks == null) warnings.push(`Attacks could not be read (needs ${fmt(required)} for a refill).`);
+    else if (attacks < required) warnings.push(`Not eligible: ${fmt(attacks)} attacks, needs ${fmt(required)} for an energy refill.`);
+  }
+  if (!cash && stockQty < req.qty) warnings.push(`Only ${fmt(stockQty)} in stock.`);
   if (req.torn_id) {
     const minA = Number(cfg.leech_min_attacks || 0), minR = Number(cfg.leech_min_requests || 0);
     if (attacks != null && attacks < minA && fulfilledReqs >= minR) warnings.push(`${fmt(fulfilledReqs)} fulfilled requests with only ${fmt(attacks)} attacks.`);
   }
   if (warnings.length) fields.push({ name: '⚠️ Warnings', value: warnings.map(w => `• ${w}`).join('\n'), inline: false });
 
-  const pub = await post(env, cfg.requests_channel, { embeds: [requestStatusEmbed(req.id, req.qty, shown, who, 'Open', COLORS.open)] });
+  const cardWhat = cash ? `${shown} (${money(amount)})` : `${req.qty} x ${shown}`;
+  const pub = await post(env, cfg.requests_channel, { embeds: [requestStatusEmbed(req.id, cash ? '' : req.qty, shown, who, 'Open', COLORS.open)] });
   const bank = await post(env, cfg.bankers_channel, {
     content: cfg.banker_role ? `<@&${cfg.banker_role}>` : undefined,
     allowed_mentions: cfg.banker_role ? { roles: [cfg.banker_role] } : undefined,
-    embeds: [{ title: `Request #${req.id}`, description: `**${req.qty} x ${shown}**`, color: warnings.length ? COLORS.declined : COLORS.open, fields }],
+    embeds: [{ title: `Request #${req.id}`, description: `**${cardWhat}**`, color: warnings.length ? COLORS.declined : COLORS.open, fields }],
     components: bankerButtons(req.id, req.torn_id),
   });
   await env.DB.prepare('UPDATE requests SET public_message_id = ?, banker_message_id = ? WHERE id = ?').bind(pub.id, bank.id, req.id).run();
@@ -529,7 +575,7 @@ async function cmdThreshold(interaction, env) {
 async function component(interaction, env, cfg, ctx) {
   const [action, idStr] = interaction.data.custom_id.split(':');
   // Member request flow: category -> item -> quantity dropdowns. Open to everyone.
-  if (action === 'req_cat') return requestCategory(interaction, env, cfg);
+  if (action === 'req_cat') return requestCategory(interaction, env, cfg, ctx);
   if (action === 'req_it') return requestItem(interaction, env, cfg);
   if (action === 'req_qty') return requestQty(interaction, env, cfg, ctx);
   const id = Number(idStr);
@@ -550,14 +596,21 @@ async function component(interaction, env, cfg, ctx) {
     const bankerName = displayName(interaction);
     const banker = await matchBanker(env, interaction);
     await env.DB.prepare(`UPDATE requests SET status = 'approved', banker_id = ?, handled_by = ?, updated_at = ? WHERE id = ? AND status = 'open'`).bind(banker?.torn_id || null, bankerName, db.now(), id).run();
+    const cash = isCashCategory(req.category);
     ctx.waitUntil((async () => {
-      await edit(env, cfg.requests_channel, req.public_message_id, { content: `<@${req.discord_id}>`, embeds: [requestStatusEmbed(id, req.qty, reqLabel(req), req.torn_name, `Pending send, approved by ${bankerName}`, COLORS.approved)] });
+      await edit(env, cfg.requests_channel, req.public_message_id, { content: `<@${req.discord_id}>`, embeds: [requestStatusEmbed(id, cash ? '' : req.qty, reqLabel(req), req.torn_name, `Pending send, approved by ${bankerName}`, COLORS.approved)] });
     })());
+    const kw = (cfg.keyword || '').split(',')[0].trim();
+    // Cash categories (energy refill) are sent as money via the member's profile, not
+    // as an item, so give the banker the amount and a profile link instead of item.php.
+    const action = cash
+      ? `[Send money](https://www.torn.com/profiles.php?XID=${req.torn_id || ''}) ${money(refillAmount(cfg) * req.qty)} to ${req.torn_name}${req.torn_id ? ` [${req.torn_id}]` : ''} with "${kw}" in the message.`
+      : `[Send](https://www.torn.com/item.php) ${req.qty} x ${reqLabel(req)} to ${req.torn_name}${req.torn_id ? ` [${req.torn_id}]` : ''} with "${kw}" in the message.`;
     const orig = interaction.message.embeds?.[0] || {};
     const updated = { ...orig, color: COLORS.approved, fields: [
       ...(orig.fields || []),
       { name: 'Approved by', value: bankerName, inline: false },
-      { name: 'Action', value: `[Send](https://www.torn.com/item.php) ${req.qty} x ${reqLabel(req)} to ${req.torn_name}${req.torn_id ? ` [${req.torn_id}]` : ''} with "${cfg.keyword}" in the message.`, inline: false },
+      { name: 'Action', value: action, inline: false },
     ] };
     return json({ type: 7, data: { embeds: [updated], components: [] } });
   }

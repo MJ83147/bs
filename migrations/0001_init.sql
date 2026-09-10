@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS config (
 );
 
 INSERT OR IGNORE INTO config (key, value) VALUES
-  ('keyword', 'BS'),
+  ('keyword', 'BS,donation'),
   ('requests_channel', ''),
   ('log_channel', ''),
   ('bankers_channel', ''),

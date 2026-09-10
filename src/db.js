@@ -164,6 +164,18 @@ export async function donorTotals(db) {
     GROUP BY counterparty_id ORDER BY total_value DESC`).all()).results;
 }
 
+// Total a single member has donated in (cash + item market value), for the banker
+// card so a request from a generous member is not declined out of hand.
+export async function donatedBy(db, tornId) {
+  const row = await db.prepare(`
+    SELECT
+      COALESCE(SUM(CASE WHEN type = 'cash' THEN qty ELSE value_at_time END), 0) AS total_value,
+      COALESCE(SUM(CASE WHEN type = 'item' THEN qty ELSE 0 END), 0) AS item_qty,
+      COALESCE(SUM(CASE WHEN type = 'cash' THEN qty ELSE 0 END), 0) AS cash
+    FROM transactions WHERE kind = 'donation' AND direction = 'in' AND counterparty_id = ?`).bind(tornId).first();
+  return row || { total_value: 0, item_qty: 0, cash: 0 };
+}
+
 export async function memberTotals(db) {
   return (await db.prepare(`
     SELECT t.counterparty_id, t.counterparty_name, i.name AS item, SUM(t.qty) AS qty, SUM(t.value_at_time) AS value
@@ -231,6 +243,45 @@ export async function deleteAvailability(db, id) {
   await db.prepare('DELETE FROM availability WHERE id = ?').bind(id).run();
 }
 
+// --- Elimination competition -------------------------------------------------
+const ELIM_RETAIN = 7 * 86400; // keep a week of snapshots; enough for the charts
+
+// Store one row per team for this tick, then prune snapshots older than a week.
+export async function recordElimination(db, ts, teams) {
+  if (!teams.length) return 0;
+  const stmt = db.prepare(`INSERT OR REPLACE INTO elimination_snapshots
+    (ts, team_id, name, position, score, lives, wins, losses, participants, eliminated)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  await db.batch(teams.map(t => stmt.bind(
+    ts, t.id, t.name, t.position, t.score, t.lives, t.wins, t.losses, t.participants, t.eliminated ? 1 : 0)));
+  await db.prepare('DELETE FROM elimination_snapshots WHERE ts < ?').bind(ts - ELIM_RETAIN).run();
+  return teams.length;
+}
+
+// Most recent stored row per team (the live standings).
+export async function latestElimination(db) {
+  const { results } = await db.prepare(`
+    SELECT s.* FROM elimination_snapshots s
+    JOIN (SELECT team_id, MAX(ts) AS mt FROM elimination_snapshots GROUP BY team_id) m
+      ON m.team_id = s.team_id AND m.mt = s.ts
+    ORDER BY s.score DESC`).all();
+  return results;
+}
+
+// Score/lives history over a window, grouped per team, for the moving charts.
+export async function eliminationHistory(db, sinceTs) {
+  const { results } = await db.prepare(`
+    SELECT ts, team_id, name, score, lives, wins, losses FROM elimination_snapshots
+    WHERE ts >= ? ORDER BY ts ASC`).bind(sinceTs).all();
+  const series = {};
+  for (const r of results) {
+    (series[r.team_id] ||= { id: r.team_id, name: r.name, points: [] })
+      .points.push([r.ts, r.score, r.lives, r.wins, r.losses]);
+    series[r.team_id].name = r.name;
+  }
+  return series;
+}
+
 export async function playerHistory(db, tornId) {
   const tx = (await db.prepare(`
     SELECT t.*, i.name AS item_name, b.name AS banker_name FROM transactions t
@@ -243,13 +294,18 @@ export async function playerHistory(db, tornId) {
   return { tx, requests };
 }
 
-// Recent requests for the banker card. For fulfilled requests, qty is the amount
-// actually sent (from the linked transaction), not the amount the member asked
-// for, since a banker may send a different quantity. Falls back to the requested
-// qty when there is no linked send (e.g. a request fulfilled without a match).
+// Recent requests for the banker card. For fulfilled requests, both the item and
+// qty reflect what the member actually received (from the linked transaction), not
+// what they asked for, since a banker may send a different item or quantity. Falls
+// back to the requested item/qty when there is no linked send (e.g. a request
+// fulfilled without a match, or a category request never matched to a send).
 export async function recentRequestsFor(db, tornId, excludeId, limit = 5) {
   return (await db.prepare(`
-    SELECT r.id, r.status, r.category, i.name AS item_name,
+    SELECT r.id, r.status, r.category,
+      CASE WHEN r.status = 'fulfilled'
+        THEN COALESCE((SELECT ti.name FROM transactions t LEFT JOIN items ti ON ti.item_id = t.item_id
+          WHERE t.request_id = r.id AND ti.name IS NOT NULL ORDER BY t.qty DESC LIMIT 1), i.name)
+        ELSE i.name END AS item_name,
       CASE WHEN r.status = 'fulfilled'
         THEN COALESCE((SELECT SUM(t.qty) FROM transactions t WHERE t.request_id = r.id), r.qty)
         ELSE r.qty END AS qty
